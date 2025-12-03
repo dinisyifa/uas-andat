@@ -7,7 +7,7 @@ from faker import Faker
 import random, datetime
 from app.database import DATABASE_URL, Base
 
-password = "Matius6ayat25@"
+password = "@Keju1234"
 password = password.replace("@", "%40")
 DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
 # DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
