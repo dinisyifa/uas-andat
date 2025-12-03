@@ -6,10 +6,11 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from faker import Faker
 import random, datetime
 from app.database import DATABASE_URL, Base
+from sqlalchemy import Column, Integer, String, Time, Date, ForeignKey
+from app.database import Base
 
-password = "Matius6ayat25@"
-password = password.replace("@", "%40")
-DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
+
+DATABASE_URL = f"mysql+pymysql://root:Dinisyifa123%21@localhost:3306/bioskop"
 # DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Base = declarative_base()
@@ -300,6 +301,18 @@ def main():
             continue
 
     print("DONE:",done,"orders")
+class Schedule(Base):
+    __tablename__ = "schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    film_id = Column(Integer, ForeignKey("movies.id"))
+    studio_id = Column(Integer, ForeignKey("studios.id"))
+    date = Column(Date)
+    start_time = Column(Time)
+    end_time = Column(Time)
+
+    movie = relationship("Movie")
+    studio = relationship("Studio")
 
 if __name__=="__main__":
     main()
