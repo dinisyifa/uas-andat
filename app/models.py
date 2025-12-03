@@ -1,140 +1,305 @@
-# app/models.py
-# ==========================================
-# Semua model data yang digunakan di sistem
-# ==========================================
+from sqlalchemy import (
+    ForeignKey, create_engine, Column, Integer, String, Date, Time,
+    UniqueConstraint
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from faker import Faker
+import random, datetime
+from app.database import DATABASE_URL, Base
 
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+password = "Matius6ayat25@"
+password = password.replace("@", "%40")
+DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
+# DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
+# Base = declarative_base()
+fake = Faker("id_ID")
 
-# ===============================
-# MODEL UNTUK ADMIN FILM #ressy
-# ===============================
-class Movie(BaseModel):
-    """
-    Representasi data satu film yang dikelola oleh Admin.
-    """
-    id: str                 # contoh: "MOV001"
-    title: str              # contoh: "Avengers: Endgame"
-    duration: str           # contoh: "3h 20m"
-    genre: str 
-    sutradara: str
-    rating_usia: str  # opsional (bisa diisi nanti)
-    price: str              # contoh: 50000
+NUM_STUDIOS = 5
+NUM_MEMBERS = 100
+ORDERS_TO_GENERATE = 1000
 
-# ===============================
-# MODEL UNTUK STUDIO #ressy
-# ===============================
-class Studio(BaseModel):
-    id: str          # contoh: "st1"
-    name: str           # contoh: "Studio 1"
-    capacity: Optional [int] = None
+MIN_ROWS = 8
+MIN_COLS = 6
 
-# ===============================
-# MODEL UNTUK JADWAL PENAYANGAN #dini
-# ===============================
-class Seat(BaseModel):
-    seat: str
-    available: bool
-
-class Schedule(BaseModel):
-    """
-    Representasi satu jadwal penayangan film di studio tertentu.
-    """
-    id_jadwal: Optional[str] = None
-    movie_id: str
-    studio_id: str
-    date: str
-    time: str
-    movie_title: Optional[str] = None
-    studio_name: Optional[str] = None
-    seats: Optional[Any] = None
+def gen(prefix,i,width):
+    return f"{prefix}{str(i).zfill(width)}"
 
 
-# ==================================
-# MODEL UNTUK DETAIL FILM DI KATALOG (USER) #tiffany
-# ==================================
-class CatalogDetail(BaseModel):
-    """
-    Model untuk menampilkan detail film di katalog (user).
-    """
-    id: str
-    title: str
-    duration: str
-    genre: str
-    sutradara: str
-    rating_usia: str
-    price: str
-    schedules: List[Schedule]  # daftar jadwal terkait film ini
-
-# ==================================
-# MODEL UNTUK DETAIL KURSI #tiffany
-# ==================================
-class SeatDetail(BaseModel):
-    """
-    Model untuk menampilkan detail kursi yang dipilih.
-    """
-    seat_number: str
-    is_booked: bool
-    user_id: Optional[str] = None
-
-# ==================================
-# MODEL UNTUK MANAJEMEN KERANJANG & TRANSAKSI (USER)
-# ==================================
-class CartAddItem(BaseModel):
-    """
-    Model untuk menambah item tiket ke keranjang.
-    User cukup memasukkan informasi yang mudah diingat.
-    """
-    movie_title: str # = Field(..., description="Judul film yang ingin ditonton.", example="Avengers: Endgame")
-    schedule_id : str   # = Field(..., description="Jam penayangan yang dipilih (format HH:MM).", example="19:00")
-    seat_number: str # = Field(..., description="Nomor kursi yang dipilih.", example="A5")
-# ==================================
-class CartItemResponse(BaseModel):
-    """
-    Model untuk menampilkan item tiket di keranjang.
-    """
-    item_id: str          # ID unik item di keranjang (misal: "ITEM001")
-    schedule_id: str
-    movie_id: str
-    movie_title: str
-    schedule: str         # gabungan date + time (misal: "2023-10-01 19:00")
-    studio: str
-    seat_number: str
-    price: int
-
-# ==================================
-# MODEL UNTUK DETAIL TRANSAKSI #lulu
-# ==================================
-class TransactionDetail(BaseModel):
-    """
-    Model untuk detail transaksi tiket.
-    """
-    transaction_id: str
-    user_id: str
-    schedule_id: str
-    seats: List[str]
-    total_price: int
+class Movie(Base):
+    __tablename__="movies"
+    id = Column(Integer,primary_key=True)
+    code = Column(String(20),unique=True)
+    title = Column(String(200))
+    genre = Column(String(100))
+    durasi = Column(Integer)
+    director = Column(String(200))
+    rating = Column(String(10))
+    price = Column(Integer)
 
 
-# ===============================================
-# MODEL BARU UNTUK ALUR CHECKOUT DUA LANGKAH
-# ===============================================
+class Studio(Base):
+    __tablename__="studios"
+    id = Column(Integer,primary_key=True)
+    code = Column(String(20),unique=True)
+    name = Column(String(100))
+    rows = Column(Integer)
+    cols = Column(Integer)
 
-class PaymentMethodRequest(BaseModel):
-    """
-    Model input dari user untuk memilih metode pembayaran.
-    """
-    payment_method: str = Field(..., description="Metode pembayaran yang dipilih", example="QRIS")
 
-class PreTransactionResponse(BaseModel):
-    """
-    Model respons setelah user memilih metode pembayaran.
-    Berisi ID pesanan sementara yang akan digunakan untuk konfirmasi.
-    """
-    order_id: str
-    total_price: int
-    payment_method: str
-    expires_at: datetime # Menunjukkan kapan pesanan sementara ini akan batal
-    tickets: List[CartItemResponse]
+class StudioSeat(Base):
+    __tablename__="studio_seats"
+    id = Column(Integer,primary_key=True)
+    studio_id = Column(Integer)
+    row = Column(String(3))
+    col = Column(Integer)
+    __table_args__ = (UniqueConstraint("studio_id","row","col"),)
+
+
+class Membership(Base):
+    __tablename__="memberships"
+    id = Column(Integer, primary_key=True)
+    code = Column(String(20),unique=True)
+    nama = Column(String(255))
+
+
+class Jadwal(Base):
+    __tablename__="jadwal"
+    id=Column(Integer,primary_key=True)
+    code=Column(String(20),unique=True)
+    movie_id=Column(Integer)
+    movie_code=Column(String(20))
+    studio_id=Column(Integer)
+    studio_code=Column(String(20))
+    tanggal=Column(Date)
+    jam=Column(Time)
+
+
+class Order(Base):
+    __tablename__="orders"
+    id=Column(Integer,primary_key=True)
+    code=Column(String(20),unique=True)
+    membership_id=Column(Integer)
+    membership_code=Column(String(20))
+    jadwal_id=Column(Integer)
+    payment_method=Column(String(50))
+    seat_count=Column(Integer)
+    promo_name=Column(String(100))
+    discount=Column(Integer)
+    total_price=Column(Integer)
+    final_price=Column(Integer)
+    cash = Column(Integer)
+    change = Column(Integer)
+    transaction_date=Column(Date)
+    hari = Column(String(10))
+
+
+class OrderSeat(Base):
+    __tablename__="order_seats"
+    id=Column(Integer,primary_key=True)
+    order_id=Column(Integer)
+    jadwal_id=Column(Integer)
+    studio_id=Column(Integer)
+    row=Column(String(3))
+    col=Column(Integer)
+    __table_args__=(UniqueConstraint("jadwal_id","row","col"),)
+
+class Cart(Base):
+    __tablename__="carts"
+    id=Column(Integer,primary_key=True)
+    membership_id=Column(Integer)
+    membership_code=Column(String(20))
+    jadwal_id=Column(Integer)
+    studio_id=Column(Integer)
+    row=Column(String(3))
+    col=Column(Integer)
+    __table_args__=(UniqueConstraint("membership_id","jadwal_id","row","col"),)
+
+def price(dur):
+    if dur>=180: return 50000
+    if dur>=125: return 45000
+    return 40000
+
+
+def seat_free(s, j, st, r,c):
+    x=s.query(OrderSeat).filter_by(jadwal_id=j,studio_id=st,row=r,col=c).first()
+    return x is None
+
+
+engine=create_engine(DATABASE_URL)
+Session=sessionmaker(bind=engine)
+
+
+
+def main():
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    db=Session()
+    
+    FILMS = [
+        ("Avengers: Endgame","Action, Fantasy",200,"Anthony Russo, Joe Russo","PG-13"),
+        ("The Conjuring","Horror, Mystery",120,"James Wan","17+"),
+        ("Frozen","Family, Musical",130," Jennifer Lee, Chris Buck","PG"),
+        ("Komang","Drama, Romance",130,"Naya Anindita","13+"),
+        ("Detective Conan: One-eyed Flashback","Anime, Mystery",125,"Katsuya Shigehara","13+")
+    ]
+
+    movies=[]
+    for i,(t,g,d,dirc,rate) in enumerate(FILMS,1):
+        m=Movie(
+            code=gen("MOV",i,3),
+            title=t,
+            genre=g,
+            durasi=d,
+            director=dirc,
+            rating=rate,
+            price=price(d)
+        )
+        db.add(m)
+        movies.append(m)
+    db.commit()
+
+
+    studios=[]
+    for i in range(1,NUM_STUDIOS+1):
+        rows=random.randint(MIN_ROWS,MIN_ROWS+5)
+        cols=random.randint(MIN_COLS,MIN_COLS+5)
+        s=Studio(code=gen("ST",i,3),name=f"Studio {i}",rows=rows,cols=cols)
+        db.add(s)
+        db.flush()
+        rl=[chr(ord("A")+k) for k in range(rows)]
+        for rr in rl:
+            for cc in range(1,cols+1):
+                db.add(StudioSeat(studio_id=s.id,row=rr,col=cc))
+        studios.append(s)
+    db.commit()
+
+
+    members=[]
+    for i in range(1,NUM_MEMBERS+1):
+        m=Membership(code=gen("MEM",i,3),nama=fake.name())
+        db.add(m)
+        members.append(m)
+    db.commit()
+
+
+    jadw=[]
+    j=1
+    times=[datetime.time(11,0),datetime.time(16,0),datetime.time(20,30)]
+
+    for d in range(1,32):
+        dt=datetime.date(2024,12,d)
+        for mv in movies:
+            for hm in times:
+                st=random.choice(studios)
+                jd=Jadwal(
+                    code=gen("JAD",j,4),
+                    movie_id=mv.id,
+                    movie_code=mv.code,
+                    studio_id=st.id,
+                    studio_code=st.code,
+                    tanggal=dt,
+                    jam=hm
+                )
+                db.add(jd)
+                db.flush()
+                jadw.append(jd)
+                j+=1
+    db.commit()
+
+
+    methods=["QRIS","Debit","Gopay","ShopeePay","CASH"]
+
+    hari_map = {
+        0:"Senin",
+        1:"Selasa",
+        2:"Rabu",
+        3:"Kamis",
+        4:"Jumat",
+        5:"Sabtu",
+        6:"Minggu"
+    }
+
+
+    done=0
+    tries=0
+
+    while done<ORDERS_TO_GENERATE and tries<ORDERS_TO_GENERATE*20:
+        tries+=1
+        jd=random.choice(jadw)
+        mv=db.query(Movie).filter_by(id=jd.movie_id).first()
+        st=db.query(Studio).filter_by(id=jd.studio_id).first()
+        mem=random.choice(members)
+
+        want=random.randint(1,6)
+
+        rl=[chr(ord('A')+k) for k in range(st.rows)]
+        seats=[]
+        att=0
+        while len(seats)<want and att<50:
+            att+=1
+            r=random.choice(rl)
+            c=random.randint(1,st.cols)
+            if (r,c) in seats:continue
+            if seat_free(db,jd.id,st.id,r, c):
+                seats.append((r,c))
+
+        if not seats:
+            continue
+
+        promo="NO PROMO"
+        disc=0
+
+        if jd.tanggal.day==12:
+            promo="SUPER 12.12"
+            disc=30
+        elif len(seats)>=5:
+            promo="BULK 5+"
+            disc=20
+
+        tot=mv.price*len(seats)
+        fin=tot-int(tot*disc/100)
+
+        pm = random.choice(methods)
+
+        cash_val = None
+        change_val = None
+
+        if pm == "CASH":
+            cash_val = random.choice([fin, fin+5000, fin+10000, fin+20000])
+            change_val = cash_val - fin
+
+
+        o=Order(
+            code=gen("ORD",done+1,6),
+            membership_id=mem.id,
+            membership_code=mem.code,
+            jadwal_id=jd.id,
+            payment_method=pm,
+            seat_count=len(seats),
+            promo_name=promo,
+            discount=disc,
+            total_price=tot,
+            final_price=fin,
+            cash=cash_val,
+            change=change_val,
+            transaction_date=jd.tanggal,
+            hari=hari_map[jd.tanggal.weekday()]     
+        )
+        db.add(o)
+        db.flush()
+
+        for (r,c) in seats:
+            db.add(OrderSeat(order_id=o.id,jadwal_id=jd.id,studio_id=st.id,row=r,col=c))
+
+        try:
+            db.commit()
+            done+=1
+        except:
+            db.rollback()
+            continue
+
+    print("DONE:",done,"orders")
+
+if __name__=="__main__":
+    main()
