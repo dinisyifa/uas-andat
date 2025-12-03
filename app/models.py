@@ -1,15 +1,18 @@
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Date, Time,
+    ForeignKey, create_engine, Column, Integer, String, Date, Time,
     UniqueConstraint
 )
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from faker import Faker
 import random, datetime
+from app.database import DATABASE_URL, Base
 
+password = "Matius6ayat25@"
+password = password.replace("@", "%40")
+DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
+# DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-DB_URL = "mysql+pymysql://root:%40Keju1234@localhost:3306/bioskop"
-
-Base = declarative_base()
+# Base = declarative_base()
 fake = Faker("id_ID")
 
 NUM_STUDIOS = 5
@@ -101,7 +104,16 @@ class OrderSeat(Base):
     col=Column(Integer)
     __table_args__=(UniqueConstraint("jadwal_id","row","col"),)
 
-
+class Cart(Base):
+    __tablename__="carts"
+    id=Column(Integer,primary_key=True)
+    membership_id=Column(Integer)
+    membership_code=Column(String(20))
+    jadwal_id=Column(Integer)
+    studio_id=Column(Integer)
+    row=Column(String(3))
+    col=Column(Integer)
+    __table_args__=(UniqueConstraint("membership_id","jadwal_id","row","col"),)
 
 def price(dur):
     if dur>=180: return 50000
@@ -114,7 +126,7 @@ def seat_free(s, j, st, r,c):
     return x is None
 
 
-engine=create_engine(DB_URL)
+engine=create_engine(DATABASE_URL)
 Session=sessionmaker(bind=engine)
 
 
