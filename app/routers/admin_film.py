@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from database import get_db
+from app.database import get_db
 from app.models import Movie, price, Membership, Studio
 from pydantic import BaseModel
 
