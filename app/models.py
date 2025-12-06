@@ -12,8 +12,8 @@ from app.database import DATABASE_URL, Base, get_db
 #password = password.replace("@", "%40")
 #DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
 
-DATABASE_URL = f"mysql+pymysql://root:Dinisyifa123%21@localhost:3306/bioskop"
-# DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+DATABASE_URL = f"mysql+pymysql://root:616084RL@localhost:3306/bioskop"
+# DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}" #isi masing-masing
 
 # Base = declarative_base()
 fake = Faker("id_ID")
