@@ -14,7 +14,6 @@ app = FastAPI(
 # Admin
 app.include_router(admin_film.router,  prefix="/admin", tags=["Admin - Film, Studio, dan Memberships"])
 # app.include_router(admin_jadwal.router, tags=["Admin - Jadwal"])
-
 # User
 # app.include_router(user_catalog.router,     tags=["User - Katalog"])           
 app.include_router(user_transaction.router, tags=["User - Cart & Checkout"])
