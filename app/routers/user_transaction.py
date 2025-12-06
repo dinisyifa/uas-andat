@@ -12,7 +12,7 @@ router = APIRouter()
 
 # CART
 class CartAddItem(BaseModel):
-    membership_id: int
+    membership_code: str
     jadwal_id: int
     row: str
     col: int
@@ -27,8 +27,8 @@ class CartItemResponse(BaseModel):
 
 # CHECKOUT
 class CheckoutRequest(BaseModel):
-    membership_id: int
-    payment_method: str # "QRIS", "Debit", "Cash", etc
+    membership_code: str
+    payment_method: str # "QRIS", "Debit", "Cash", "ShopeePay", etc.
     cash_amount: Optional[int] = None
 
 class OrderResponse(BaseModel):
@@ -49,6 +49,7 @@ def check_seat_taken(db: Session, jadwal_id: int, row: str, col: int) -> bool:
 
 # --- Routes ---
 
+# CREATE CART
 @router.post("/cart/add", response_model=CartAddItem)
 def add_to_cart(item: CartAddItem, db: Session = Depends(get_db)):
     # 1. Validasi Jadwal
@@ -57,7 +58,7 @@ def add_to_cart(item: CartAddItem, db: Session = Depends(get_db)):
         raise HTTPException(404, "Jadwal tidak ditemukan")
 
     # 2. Validasi Member
-    member = db.query(Membership).filter(Membership.id == item.membership_id).first()
+    member = db.query(Membership).filter(Membership.code == item.membership_code).first()
     if not member:
         raise HTTPException(404, "Member tidak ditemukan")
 
@@ -67,7 +68,7 @@ def add_to_cart(item: CartAddItem, db: Session = Depends(get_db)):
 
     # 4. Cek apakah kursi sudah ada di CART user sendiri (duplikat)
     existing_cart = db.query(Cart).filter_by(
-        membership_id=item.membership_id,
+        membership_code=item.membership_code,
         jadwal_id=item.jadwal_id,
         row=item.row,
         col=item.col
@@ -81,7 +82,7 @@ def add_to_cart(item: CartAddItem, db: Session = Depends(get_db)):
     movie_price = jadwal.movie.price
     
     new_item = Cart(
-        membership_id=item.membership_id,
+        membership_code=item.membership_code,
         jadwal_id=item.jadwal_id,
         row=item.row,
         col=item.col,
@@ -92,10 +93,16 @@ def add_to_cart(item: CartAddItem, db: Session = Depends(get_db)):
     
     return {"message": "Berhasil masuk keranjang", "seat": f"{item.row}{item.col}"}
 
+# GET - Lihat isi keranjang
+@router.get("/cart")
+def get_all_carts(db: Session = Depends(get_db)):
+    carts = db.query(Cart).all()
+    return carts
 
-@router.get("/cart/{membership_id}")
-def get_cart(membership_id: int, db: Session = Depends(get_db)):
-    items = db.query(Cart).filter(Cart.membership_id == membership_id).all()
+# READ MEMBERSHIP CART
+@router.get("/cart/{membership_code}")
+def get_cart(membership_code: str, db: Session = Depends(get_db)):
+    items = db.query(Cart).filter(Cart.membership_code == membership_code).all()
     
     if not items:
         return {"message": "Keranjang kosong", "items": [], "total": 0}
@@ -119,7 +126,7 @@ def get_cart(membership_id: int, db: Session = Depends(get_db)):
 
     return {"items": result, "total_price": total}
 
-
+# DELETE CART ITEM
 @router.delete("/cart/remove/{cart_id}")
 def remove_cart_item(cart_id: int, db: Session = Depends(get_db)):
     item = db.query(Cart).filter(Cart.id == cart_id).first()
@@ -130,11 +137,11 @@ def remove_cart_item(cart_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Item dihapus dari keranjang"}
 
-
+# CREATE CHECKOUT
 @router.post("/checkout", response_model=OrderResponse)
 def checkout_cart(payload: CheckoutRequest, db: Session = Depends(get_db)):
     # 1. Ambil semua item di cart user
-    cart_items = db.query(Cart).filter(Cart.membership_id == payload.membership_id).all()
+    cart_items = db.query(Cart).filter(Cart.membership_code == payload.membership_code).all()
     if not cart_items:
         raise HTTPException(400, "Keranjang kosong")
 
@@ -145,7 +152,7 @@ def checkout_cart(payload: CheckoutRequest, db: Session = Depends(get_db)):
              raise HTTPException(409, f"Gagal: Kursi {item.row}-{item.col} baru saja dibeli orang lain.")
 
     # 3. Hitung Total & Promo
-    member = db.query(Membership).filter(Membership.id == payload.membership_id).first()
+    member = db.query(Membership).filter(Membership.code == payload.membership_code).first()
     
     total_price = sum(item.price for item in cart_items)
     seat_count = len(cart_items)
@@ -225,3 +232,28 @@ def checkout_cart(payload: CheckoutRequest, db: Session = Depends(get_db)):
         "final_price": final_price,
         "status": "SUCCESS"
     }
+
+# READ KONFIRMASI CHECKOUT
+@router.get("/order/{order_code}", response_model=OrderResponse)
+def get_order(order_code: str, db: Session = Depends(get_db)):  
+    order = db.query(Order).filter(Order.code == order_code).first()
+    if not order:
+        raise HTTPException(404, "Order tidak ditemukan")
+    
+    return {
+        "order_code": order.code,
+        "total_seat": order.seat_count,
+        "final_price": order.final_price,
+        "status": f"Pesanan `{order.code}` berhasil diproses"
+    }
+
+# DELETE CART ITEM
+@router.delete("/cart/remove/{cart_id}")
+def remove_cart_item(cart_id: int, db: Session = Depends(get_db)):
+    item = db.query(Cart).filter(Cart.id == cart_id).first()
+    if not item:
+        raise HTTPException(404, "Pesanan tidak ditemukan")
+    
+    db.delete(item)
+    db.commit()
+    return {"message": "Item cart berhasil dihapus"}        

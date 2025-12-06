@@ -19,6 +19,9 @@ app.include_router(admin_jadwal.router, tags=["Admin - Jadwal"])
 # app.include_router(user_catalog.router,     tags=["User - Katalog"])           
 app.include_router(user_transaction.router, tags=["User - Cart & Checkout"])
 
+# Analisis
+app.include_router(analisis.router, tags=["Analisis Data"])
+
 @app.get("/")
 def home():
     return {
