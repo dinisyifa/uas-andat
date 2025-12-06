@@ -257,4 +257,3 @@ def remove_cart_item(cart_id: int, db: Session = Depends(get_db)):
     db.delete(item)
     db.commit()
     return {"message": "Item cart berhasil dihapus"}        
-
