@@ -4,11 +4,7 @@ from app.database import get_db
 from app.models import Schedule, Movie, Studio
 from pydantic import BaseModel
 
-router = APIRouter()
-
-# ===========================
-# Pydantic Model
-# ===========================
+router = APIRouter(prefix="/schedules")
 
 class ScheduleInput(BaseModel):
     movie_code: str
@@ -29,23 +25,17 @@ class ScheduleOut(BaseModel):
         orm_mode = True
 
 
-# ===========================
-# Helper — Generate Code
-# ===========================
 def generate_schedule_code(db: Session):
     last = db.query(Schedule).order_by(Schedule.id.desc()).first()
     next_id = (last.id + 1) if last else 1
     return f"SCH{str(next_id).zfill(3)}"
 
 
-# ===========================
-# GET ALL SCHEDULES
-# ===========================
 @router.get("/schedules", response_model=list[ScheduleOut])
 def get_schedules(db: Session = Depends(get_db)):
 
     schedules = db.query(Schedule).all()
-    output = []
+
 
     for s in schedules:
         movie = db.query(Movie).filter(Movie.code == s.movie_code).first()
@@ -63,10 +53,6 @@ def get_schedules(db: Session = Depends(get_db)):
 
     return output
 
-
-# ===========================
-# CREATE SCHEDULE
-# ===========================
 @router.post("/schedules", response_model=ScheduleOut)
 def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
 
@@ -105,9 +91,6 @@ def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
     )
 
 
-# ===========================
-# UPDATE SCHEDULE
-# ===========================
 @router.put("/schedules/{code}", response_model=ScheduleOut)
 def update_schedule(code: str, item: ScheduleInput, db: Session = Depends(get_db)):
 
@@ -142,9 +125,6 @@ def update_schedule(code: str, item: ScheduleInput, db: Session = Depends(get_db
     )
 
 
-# ===========================
-# DELETE SCHEDULE
-# ===========================
 @router.delete("/schedules/{code}")
 def delete_schedule(code: str, db: Session = Depends(get_db)):
 
