@@ -20,7 +20,7 @@ app.include_router(user_catalog.router,     tags=["User - Katalog"])
 app.include_router(user_transaction.router, tags=["User - Cart & Checkout"])
 
 # Analisis
-app.include_router(analisis.router, tags=["Analisis Data"])
+#app.include_router(analisis.router, tags=["Analisis Data"])
 
 @app.get("/")
 def home():
