@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Schedule, Movie, Studio
+from app.models import Jadwal, Movie, Studio
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/schedules")

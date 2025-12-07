@@ -1,6 +1,6 @@
 # app/main.py
 from fastapi import FastAPI
-from app.routers import admin_film, user_transaction, admin_jadwal, user_catalog, user_transaction
+from app.routers import admin_film, user_transaction, admin_jadwal, user_catalog, user_transaction, analisis
 from app.database import engine, Base
 import app.models
 Base.metadata.create_all(bind=engine)
@@ -28,3 +28,11 @@ def home():
         "message": "Movie Booking API aktif (Admin & User)",
         "info": "Cek /docs untuk Swagger UI.",
     }
+
+# TAMBAHAN UNTUK FILE ANALISIS_TIFF.PY
+# Import file yang baru dibuat
+from app import analisis_tiff 
+# ATAU jika filenya ada di dalam folder routers : from routers import analisis_tiff
+# Masukkan router ke app
+app.include_router(analisis_tiff.router)
+
