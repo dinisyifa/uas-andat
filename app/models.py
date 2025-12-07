@@ -12,7 +12,7 @@ from app.database import DATABASE_URL, Base, get_db
 #password = password.replace("@", "%40")
 #DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
 
-DATABASE_URL = f"mysql+pymysql://root:Dinisyifa123%21@localhost:3306/bioskop"
+DATABASE_URL = f"mysql+pymysql://root:%40Keju1234@localhost:3306/bioskop"
 # DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Base = declarative_base()

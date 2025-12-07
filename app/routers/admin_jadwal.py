@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Schedule, Movie, Studio
+from app.models import Jadwal, Movie, Studio
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/schedules")
@@ -34,7 +34,7 @@ def generate_schedule_code(db: Session):
 @router.get("/schedules", response_model=list[ScheduleOut])
 def get_schedules(db: Session = Depends(get_db)):
 
-    schedules = db.query(Schedule).all()
+    schedules = db.query(Jadwal).all()
 
 
     for s in schedules:
@@ -68,7 +68,7 @@ def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
 
     new_code = generate_schedule_code(db)
 
-    schedule = Schedule(
+    schedule = Jadwal(
         code=new_code,
         movie_code=item.movie_code,
         studio_code=item.studio_code,
@@ -94,7 +94,7 @@ def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
 @router.put("/schedules/{code}", response_model=ScheduleOut)
 def update_schedule(code: str, item: ScheduleInput, db: Session = Depends(get_db)):
 
-    schedule = db.query(Schedule).filter(Schedule.code == code).first()
+    schedule = db.query(Jadwal).filter(Jadwal.code == code).first()
     if not schedule:
         raise HTTPException(404, "Jadwal tidak ditemukan")
 
@@ -128,7 +128,7 @@ def update_schedule(code: str, item: ScheduleInput, db: Session = Depends(get_db
 @router.delete("/schedules/{code}")
 def delete_schedule(code: str, db: Session = Depends(get_db)):
 
-    schedule = db.query(Schedule).filter(Schedule.code == code).first()
+    schedule = db.query(Jadwal).filter(Jadwal.code == code).first()
     if not schedule:
         raise HTTPException(404, "Jadwal tidak ditemukan")
 

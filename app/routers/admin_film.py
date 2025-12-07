@@ -30,23 +30,30 @@ class MovieOut(BaseModel):
 
 
 def generate_movie_code(db: Session):
-    last = db.query(Movie).order_by(Movie.id.desc()).first()
-    next_id = (last.id + 1) if last else 1
-    return f"MOV{str(next_id).zfill(3)}"
+    last_id = db.query(func.max(Movie.id)).scalar()
+
+    next_id = (last_id + 1) if last_id else 1
+
+    return next_id, f"MOV{str(next_id).zfill(3)}"
 
 
-@router.get("/movies", response_model=list[MovieOut])
+@router.get("/movies")
 def get_movies(db: Session = Depends(get_db)):
-    return db.query(Movie).all()
+    movies = db.query(Movie).all()
+    return {
+        "message": "Daftar Film yang tersedia",
+        "data": movies
+    }
 
 
-@router.post("/movies", response_model=MovieOut)
+@router.post("/movies")
 def add_movie(item: MovieInput, db: Session = Depends(get_db)):
 
-    new_code = generate_movie_code(db)
+    next_id, new_code = generate_movie_code(db)
     ticket_price = price(item.durasi)
 
     movie = Movie(
+        id=next_id,
         code=new_code,
         title=item.title,
         genre=item.genre,
@@ -59,7 +66,13 @@ def add_movie(item: MovieInput, db: Session = Depends(get_db)):
     db.add(movie)
     db.commit()
     db.refresh(movie)
-    return movie
+
+    return {
+        "message": "Film berhasil ditambahkan",
+        "data": movie
+    }
+
+
 
 
 @router.put("/movies/{code}", response_model=MovieOut)
@@ -78,7 +91,10 @@ def update_movie(code: str, item: MovieInput, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(movie)
-    return movie
+    return {
+        "message": "Film berhasil diperbarui",
+        "data": movie
+    }
 
 
 @router.delete("/movies/{code}")
@@ -110,27 +126,29 @@ class StudioOut(BaseModel):
 
 
 def generate_studio_code(db: Session):
-    last = db.query(Studio).order_by(Studio.id.desc()).first()
-    next_id = (last.id + 1) if last else 1
-    return (
-        f"ST{str(next_id).zfill(3)}",
-        f"Studio {next_id}"
-    )
+    last_id = db.query(func.max(Studio.id)).scalar()
+    next_id = (last_id + 1) if last_id else 1
+
+    return next_id, f"ST{str(next_id).zfill(3)}", f"Studio {next_id}"
 
 
 
-
-@router.get("/studios", response_model=list[StudioOut])
+@router.get("/studios")
 def get_studios(db: Session = Depends(get_db)):
-    return db.query(Studio).all()
+    studios = db.query(Studio).all()
+    return {
+        "message": "Daftar Studio yang tersedia",
+        "data": studios
+    }
 
 
-@router.post("/studios", response_model=StudioOut)
+@router.post("/studios")
 def add_studio(item: StudioInput, db: Session = Depends(get_db)):
 
-    code, name = generate_studio_code(db)
+    next_id, code, name = generate_studio_code(db)
 
     studio = Studio(
+        id=next_id,       
         code=code,
         name=name,
         rows=item.rows,
@@ -140,7 +158,11 @@ def add_studio(item: StudioInput, db: Session = Depends(get_db)):
     db.add(studio)
     db.commit()
     db.refresh(studio)
-    return studio
+
+    return {
+        "message": "Studio berhasil ditambahkan",
+        "data": studio
+    }
 
 
 @router.put("/studios/{code}", response_model=StudioOut)
@@ -184,25 +206,29 @@ class MembershipOut(BaseModel):
 
 
 def generate_member_code(db: Session):
-    last = db.query(Membership).order_by(Membership.id.desc()).first()
-    next_id = (last.id + 1) if last else 1
-    return f"MEM{str(next_id).zfill(3)}"
+    last_id = db.query(func.max(Membership.id)).scalar()
+    next_id = (last_id + 1) if last_id else 1
+    return next_id, f"MEM{str(next_id).zfill(3)}"
 
 
 
-
-
-@router.get("/members", response_model=list[MembershipOut])
+@router.get("/members")
 def get_memberships(db: Session = Depends(get_db)):
-    return db.query(Membership).all()
+    members = db.query(Membership).all()
+    return {
+        "message": "Daftar Membership yang tersedia",
+        "data": members
+    }
 
 
-@router.post("/members", response_model=MembershipOut)
+
+@router.post("/members")
 def add_membership(item: MembershipInput, db: Session = Depends(get_db)):
 
-    new_code = generate_member_code(db)
+    next_id, new_code = generate_member_code(db)
 
     member = Membership(
+        id=next_id,     
         code=new_code,
         nama=item.nama
     )
@@ -210,7 +236,11 @@ def add_membership(item: MembershipInput, db: Session = Depends(get_db)):
     db.add(member)
     db.commit()
     db.refresh(member)
-    return member
+
+    return {
+        "message": "Membership berhasil ditambahkan",
+        "data": member
+    }
 
 
 @router.put("/members/{code}", response_model=MembershipOut)
