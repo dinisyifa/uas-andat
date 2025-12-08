@@ -1,8 +1,9 @@
 # app/main.py
 from fastapi import FastAPI
-from app.routers import admin_film, user_transaction, admin_jadwal, user_catalog, user_transaction
+from app.routers import admin_film, user_transaction, admin_jadwal, user_catalog
 from app.database import engine, Base
 import app.models
+from app.routers import analisis
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -16,7 +17,7 @@ app.include_router(admin_film.router,  tags=["Admin - Film, Studio, dan Membersh
 app.include_router(admin_jadwal.router, tags=["Admin - Jadwal"])
 
 # User
-# app.include_router(user_catalog.router,     tags=["User - Katalog"])           
+app.include_router(user_catalog.router,     tags=["User - Katalog"])           
 app.include_router(user_transaction.router, tags=["User - Cart & Checkout"])
 
 # Analisis

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import date, datetime
 
@@ -338,8 +338,206 @@ def jamtayang_monthly(bulan: str, db: Session = Depends(get_db)):
     }
 
 
-# 3. Pilihan kursi paling populer
+# 3. pengaruh perbedaan harga dan promo
 
-# 4. Pendapatan per film
+def hasil_kesimpulan(t_change, p_change, h_change):
+    """Menerjemahkan persentase perubahan menjadi kalimat kesimpulan."""
+    if t_change is None:
+        return "Data transaksi tanpa promo tidak tersedia untuk analisis."
 
-# 5. Perilaku pelanggann (member paling sering beli)
+    kesimpulan = []
+    
+    # Efektivitas berdasarkan transaksi
+    if t_change is not None:
+        if t_change > 0:
+            kesimpulan.append(f"Promo meningkatkan jumlah transaksi sebesar {t_change}%")
+        else:
+            kesimpulan.append(f"Promo tidak efektif, transaksi turun {abs(t_change)}%")
+
+    # Efektivitas berdasarkan pendapatan
+    if p_change is not None:
+        if p_change > 0:
+            kesimpulan.append(f"Promo meningkatkan pendapatan sebesar {p_change}%")
+        else:
+            kesimpulan.append(f"Promo menurunkan pendapatan sebesar {abs(p_change)}%")
+
+    # Efektivitas harga (Biaya)
+    if h_change is not None:
+        if h_change < 0:
+            kesimpulan.append(f"Harga rata-rata turun {abs(h_change)}% saat promo (indikasi diskon efektif).")
+        else:
+            kesimpulan.append(f"Harga rata-rata naik {h_change}% meski ada promo (perlu evaluasi).")
+
+    return " | ".join(kesimpulan)
+
+
+# --- ROUTER ANALISIS EFEKTIVITAS PROMO ---
+
+@router.get("/analisis/promo-efektivitas")
+def analisis_efektivitas_promo(db: Session = Depends(get_db)):
+    # 1. KUERI SQL PALING AMAN: Mengambil kolom mentah
+    query = text("""
+        SELECT 
+            id,
+            promo_name,
+            final_price
+        FROM orders;
+    """)
+
+    try:
+        rows = db.execute(query).mappings().all()
+    except Exception as e:
+        # Jika SELECT mentah gagal, ini adalah masalah koneksi/server fatal
+        raise HTTPException(status_code=500, detail=f"Gagal mengambil data orders mentah dari database: {e}")
+
+    # 2. INISIALISASI DAN AGREGASI DI PYTHON
+    tanpa = {"total_transaksi": 0, "total_pendapatan": 0.0, "harga_list": []}
+    dengan = {"total_transaksi": 0, "total_pendapatan": 0.0, "harga_list": []}
+
+    for r in rows:
+        try:
+            # Penanganan data NULL/Kotor: Mengubah harga menjadi float aman
+            price = float(r["final_price"]) if r["final_price"] is not None else 0.0
+            promo_name = r["promo_name"]
+            
+            # Penentuan Kategori: BUKAN 'NO PROMO'
+            is_promo = (promo_name is not None and promo_name != 'NO PROMO')
+    
+            target = dengan if is_promo else tanpa
+            
+            target["total_transaksi"] += 1
+            target["total_pendapatan"] += price
+            target["harga_list"].append(price)
+
+        except Exception as e:
+            # Mengabaikan baris data yang kotor/bermasalah
+            continue
+            
+    # 3. PERHITUNGAN AVG DAN FORMAT OUTPUT
+    
+    t_tanpa = tanpa["total_transaksi"]
+    t_dengan = dengan["total_transaksi"]
+    
+    # Hitung AVG (Rata-rata)
+    tanpa['avg_harga'] = sum(tanpa['harga_list']) / t_tanpa if t_tanpa > 0 else 0.0
+    dengan['avg_harga'] = sum(dengan['harga_list']) / t_dengan if t_dengan > 0 else 0.0
+    
+    # Format output final (menghilangkan list harga)
+    tanpa_final = {k: v for k, v in tanpa.items() if k != 'harga_list'}
+    dengan_final = {k: v for k, v in dengan.items() if k != 'harga_list'}
+    
+    # 4. PERHITUNGAN PERSENTASE
+    
+    t_change, p_change, h_change = None, None, None
+
+    if t_tanpa > 0:
+        # Persentase Perubahan Volume Transaksi
+        t_change = round(((t_dengan - t_tanpa) / t_tanpa) * 100, 2)
+        
+        # Persentase Perubahan Pendapatan
+        p_tanpa = tanpa_final["total_pendapatan"]
+        if p_tanpa > 0:
+            p_change = round(((dengan_final["total_pendapatan"] - p_tanpa) / p_tanpa) * 100, 2)
+            
+        # Persentase Perubahan Harga Rata-rata
+        h_tanpa = tanpa_final["avg_harga"]
+        if h_tanpa > 0:
+            h_change = round(((dengan_final["avg_harga"] - h_tanpa) / h_tanpa) * 100, 2)
+    
+
+    return {
+        "ringkasan": {
+            "transaksi_promo_vs_tanpa": t_change,
+            "pendapatan_promo_vs_tanpa": p_change,
+            "perbedaan_rata_rata_harga": h_change
+        },
+        "analisis": {
+            "tanpa_promo": tanpa_final,
+            "dengan_promo": dengan_final,
+        },
+        "kesimpulan": hasil_kesimpulan(t_change, p_change, h_change)
+    }
+
+
+
+
+# 4. pilihan kursi paling populer
+from datetime import datetime, date, timedelta
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from fastapi import APIRouter, Depends, HTTPException
+
+# Fungsi utilitas untuk kueri Top 5 Kursi (Disimpan di sini)
+def get_top5_kursi_query(start_date: date, end_date: date):
+    # Menggunakan CONCAT(os.row, os.col) dan tabel orders/order_seats yang benar
+    return text("""
+        SELECT
+            CONCAT(os.row, os.col) AS kursi_kode,
+            COUNT(os.id) AS jumlah
+        FROM order_seats os
+        JOIN orders o ON os.order_id = o.id
+        WHERE DATE(o.transaction_date) >= :start_date
+          AND DATE(o.transaction_date) <= :end_date 
+        GROUP BY kursi_kode
+        ORDER BY jumlah DESC
+        LIMIT 5;
+    """)
+
+@router.get("/kursipopuler/{mode}")
+def kursi_paling_populer(
+    mode: str,  # "harian", "mingguan", "bulanan"
+    tanggal: str = None, # Jadikan opsional, akan dihitung jika weekly/monthly
+    db: Session = Depends(get_db)
+):
+    """
+    Menampilkan Top 5 kursi terpopuler berdasarkan mode (harian, mingguan, bulanan)
+    """
+    
+    # 1. Tentukan Tanggal Dasar
+    if tanggal:
+        try:
+            tgl = datetime.strptime(tanggal, "%Y-%m-%d").date() # Konversi ke date object
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
+    else:
+        # Jika tanggal tidak diberikan, gunakan hari ini atau 1 Desember 2024
+        tgl = date(2024, 12, 1)
+
+    # 2. Tentukan Range berdasarkan Mode
+    if mode == "harian":
+        start = tgl
+        end = tgl
+    elif mode == "harian":
+        start = tgl  # tgl adalah objek date(YYYY, MM, DD)
+        end = tgl    # Akhir range juga tanggal yang sama
+
+    elif mode == "mingguan":
+        raise HTTPException(status_code=400, detail="Gunakan endpoint /kursipopuler/weekly statis")
+        
+    elif mode == "bulanan":
+        start = tgl.replace(day=1)
+        if start.month == 12:
+            end = date(start.year, 12, 31)
+        else:
+            end = date(start.year, start.month + 1, 1) - timedelta(days=1)
+            
+    else:
+        raise HTTPException(status_code=400, detail="Mode harus harian/bulanan")
+
+    # 3. Eksekusi Query
+    query = get_top5_kursi_query(start, end)
+    result = db.execute(query, {"start_date": start, "end_date": end}).mappings().all()
+
+    if not result:
+        return {"mode": mode, "message": f"Tidak ada data transaksi untuk range {start} s/d {end}"}
+
+    return {
+        "mode": mode,
+        "tanggal_awal": start.isoformat(),
+        "tanggal_akhir": end.isoformat(),
+        "top_5_kursi": [
+            {"kursi_kode": row.kursi_kode, "jumlah_pemesanan": row.jumlah}
+            for row in result
+        ]
+    }
+    
