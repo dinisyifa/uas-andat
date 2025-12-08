@@ -1,6 +1,6 @@
 # app/main.py
 from fastapi import FastAPI
-from app.routers import admin_film, user_transaction, admin_jadwal, user_catalog, user_transaction
+from app.routers import admin_film, admin_jadwal, user_catalog, user_transaction, analisis
 from app.database import engine, Base
 import app.models
 Base.metadata.create_all(bind=engine)
@@ -20,7 +20,7 @@ app.include_router(user_catalog.router,     tags=["User - Katalog"])
 app.include_router(user_transaction.router, tags=["User - Cart & Checkout"])
 
 # Analisis
-#app.include_router(analisis.router, tags=["Analisis Data"])
+app.include_router(analisis.router, prefix="/api/admin", tags=["Analisis Data"])
 
 @app.get("/")
 def home():

@@ -12,8 +12,10 @@ from app.database import DATABASE_URL, Base, get_db
 #password = password.replace("@", "%40")
 #DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
 
-DATABASE_URL = f"mysql+pymysql://root:616084RL@localhost:3306/bioskop"
-# DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}" #isi masing-masing
+password = "Matius6ayat25@"
+password = password.replace("@", "%40")
+DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
+# DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Base = declarative_base()
 fake = Faker("id_ID")
@@ -88,6 +90,7 @@ class Order(Base):
     membership_id = Column(Integer)
     membership_code = Column(String(20))
     jadwal_id = Column(Integer)
+    jadwal_code = Column(String(20))
     payment_method = Column(String(50))
     seat_count = Column(Integer)
     promo_name = Column(String(100))
@@ -108,18 +111,28 @@ class OrderSeat(Base):
     studio_id = Column(Integer)
     row = Column(String(3))
     col = Column(Integer)
-    __table_args__ = (UniqueConstraint("jadwal_id", "row", "col"),)
+    _table_args_ = (UniqueConstraint("jadwal_id", "row", "col"),)
 
 
 class Cart(Base):
     __tablename__ = "carts"
     id = Column(Integer, primary_key=True)
+    
+    # Identitas User
     membership_id = Column(Integer)
-    membership_code = Column(String(20))
+    membership_code = Column(String(20)) # Kita simpan juga codenya agar mudah dibaca
+    
+    # Identitas Jadwal
     jadwal_id = Column(Integer)
-    studio_id = Column(Integer)
+    # jadwal_code = Column(String(20)) # HAPUS INI agar tidak bingung (kita pakai ID saja untuk relasi)
+    
+    # Detail Kursi & Harga
+    studio_id = Column(Integer) # Wajib ada untuk validasi kursi
     row = Column(String(3))
     col = Column(Integer)
+    price = Column(Integer)     # Wajib ada untuk hitung total
+    
+    # Constraint agar tidak ada kursi ganda di keranjang user yang sama
     __table_args__ = (UniqueConstraint("membership_id", "jadwal_id", "row", "col"),)
 
 
@@ -298,6 +311,7 @@ def main():
             membership_id=mem.id,
             membership_code=mem.code,
             jadwal_id=jd.id,
+            jadwal_code=jd.code,
             payment_method=pm,
             seat_count=len(seats),
             promo_name=promo,
