@@ -1,6 +1,6 @@
 from sqlalchemy import (
     ForeignKey, create_engine, Column, Integer, String, Date, Time,
-    UniqueConstraint
+    UniqueConstraint, text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from faker import Faker
@@ -8,16 +8,11 @@ import random, datetime
 from tqdm import tqdm
 from app.database import DATABASE_URL, Base, get_db
 
-#password = "@Keju1234"
-#password = password.replace("@", "%40")
-#DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
-
+# Pastikan konfigurasi database Anda benar
 password = "Matius6ayat25@"
 password = password.replace("@", "%40")
 DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
-# DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-# Base = declarative_base()
 fake = Faker("id_ID")
 
 NUM_STUDIOS = 5
@@ -30,8 +25,6 @@ MIN_COLS = 6
 
 def gen(prefix, i, width):
     return f"{prefix}{str(i).zfill(width)}"
-
-
 
 
 class Movie(Base):
@@ -111,7 +104,7 @@ class OrderSeat(Base):
     studio_id = Column(Integer)
     row = Column(String(3))
     col = Column(Integer)
-    _table_args_ = (UniqueConstraint("jadwal_id", "row", "col"),)
+    __table_args__ = (UniqueConstraint("jadwal_id", "row", "col"),)
 
 
 class Cart(Base):
@@ -120,19 +113,17 @@ class Cart(Base):
     
     # Identitas User
     membership_id = Column(Integer)
-    membership_code = Column(String(20)) # Kita simpan juga codenya agar mudah dibaca
+    membership_code = Column(String(20)) 
     
     # Identitas Jadwal
     jadwal_id = Column(Integer)
-    # jadwal_code = Column(String(20)) # HAPUS INI agar tidak bingung (kita pakai ID saja untuk relasi)
     
     # Detail Kursi & Harga
-    studio_id = Column(Integer) # Wajib ada untuk validasi kursi
+    studio_id = Column(Integer) 
     row = Column(String(3))
     col = Column(Integer)
-    price = Column(Integer)     # Wajib ada untuk hitung total
+    price = Column(Integer)    
     
-    # Constraint agar tidak ada kursi ganda di keranjang user yang sama
     __table_args__ = (UniqueConstraint("membership_id", "jadwal_id", "row", "col"),)
 
 
@@ -153,15 +144,20 @@ engine = create_engine(DATABASE_URL)
 Session = sessionmaker(bind=engine)
 
 
-
-
 def main():
+    print("Menghapus tabel lama...")
     Base.metadata.drop_all(engine)
+    print("Membuat tabel baru...")
     Base.metadata.create_all(engine)
     db = Session()
 
+    # --- MEMASTIKAN ID 0 BISA MASUK ---
+    try:
+        db.execute(text("SET SESSION sql_mode='NO_AUTO_VALUE_ON_ZERO';"))
+    except Exception as e:
+        print(f"Warning: Gagal set SQL Mode. ID 0 mungkin menjadi 1. Error: {e}")
 
-
+    print("Generating Movies...")
     FILMS = [
         ("Avengers: Endgame", "Action, Fantasy", 200, "Anthony Russo, Joe Russo", "PG-13"),
         ("The Conjuring", "Horror, Mystery", 120, "James Wan", "17+"),
@@ -174,52 +170,50 @@ def main():
     for i, (t, g, d, dirc, rate) in enumerate(FILMS, 1):
         m = Movie(
             code=gen("MOV", i, 3),
-            title=t,
-            genre=g,
-            durasi=d,
-            director=dirc,
-            rating=rate,
-            price=price(d)
+            title=t, genre=g, durasi=d, director=dirc, rating=rate, price=price(d)
         )
         db.add(m)
         movies.append(m)
     db.commit()
 
-
-
+    print("Generating Studios...")
     studios = []
     for i in range(1, NUM_STUDIOS + 1):
         rows = random.randint(MIN_ROWS, MIN_ROWS + 5)
         cols = random.randint(MIN_COLS, MIN_COLS + 5)
-
         s = Studio(code=gen("ST", i, 3), name=f"Studio {i}", rows=rows, cols=cols)
         db.add(s)
         db.flush()
-
         rl = [chr(ord("A") + k) for k in range(rows)]
         for rr in rl:
             for cc in range(1, cols + 1):
                 db.add(StudioSeat(studio_id=s.id, row=rr, col=cc))
-
         studios.append(s)
-
     db.commit()
 
-
-
+    print("Generating Members...")
     members = []
+
+    # --- KHUSUS: Buat Member ID 0 (Non-Member) ---
+    guest = Membership(
+        id=0,
+        code="MEM000",
+        nama="Non-Member (Guest)"
+    )
+    db.add(guest)
+    # Note: Guest tidak dimasukkan ke list 'members' agar tidak ikut random order di bawah
+
+    # --- Buat 100 Member Regular ---
     for i in range(1, NUM_MEMBERS + 1):
         m = Membership(code=gen("MEM", i, 3), nama=fake.name())
         db.add(m)
         members.append(m)
     db.commit()
 
-
-
+    print("Generating Jadwal...")
     jadw = []
     j = 1
     times = [datetime.time(11, 0), datetime.time(16, 0), datetime.time(20, 30)]
-
     for d in range(1, 32):
         dt = datetime.date(2024, 12, d)
         for mv in movies:
@@ -227,12 +221,9 @@ def main():
                 st = random.choice(studios)
                 jd = Jadwal(
                     code=gen("JAD", j, 4),
-                    movie_id=mv.id,
-                    movie_code=mv.code,
-                    studio_id=st.id,
-                    studio_code=st.code,
-                    tanggal=dt,
-                    jam=hm
+                    movie_id=mv.id, movie_code=mv.code,
+                    studio_id=st.id, studio_code=st.code,
+                    tanggal=dt, jam=hm
                 )
                 db.add(jd)
                 db.flush()
@@ -240,35 +231,22 @@ def main():
                 j += 1
     db.commit()
 
-
-
+    print("Generating Orders...")
     methods = ["QRIS", "Debit", "Gopay", "ShopeePay", "CASH"]
-
-    hari_map = {
-        0: "Senin",
-        1: "Selasa",
-        2: "Rabu",
-        3: "Kamis",
-        4: "Jumat",
-        5: "Sabtu",
-        6: "Minggu"
-    }
-
+    hari_map = {0: "Senin", 1: "Selasa", 2: "Rabu", 3: "Kamis", 4: "Jumat", 5: "Sabtu", 6: "Minggu"}
+    
     done = 0
     tries = 0
-
     progress = tqdm(total=ORDERS_TO_GENERATE, desc="Building Orders", unit="order")
 
     while done < ORDERS_TO_GENERATE and tries < ORDERS_TO_GENERATE * 20:
         tries += 1
-
         jd = random.choice(jadw)
         mv = db.query(Movie).filter_by(id=jd.movie_id).first()
         st = db.query(Studio).filter_by(id=jd.studio_id).first()
         mem = random.choice(members)
 
         want = random.randint(1, 6)
-
         rl = [chr(ord('A') + k) for k in range(st.rows)]
         seats = []
         att = 0
@@ -277,17 +255,14 @@ def main():
             att += 1
             r = random.choice(rl)
             c = random.randint(1, st.cols)
-            if (r, c) in seats:
-                continue
+            if (r, c) in seats: continue
             if seat_free(db, jd.id, st.id, r, c):
                 seats.append((r, c))
 
-        if not seats:
-            continue
+        if not seats: continue
 
         promo = "NO PROMO"
         disc = 0
-
         if jd.tanggal.day == 12:
             promo = "SUPER 12.12"
             disc = 30
@@ -297,11 +272,9 @@ def main():
 
         tot = mv.price * len(seats)
         fin = tot - int(tot * disc / 100)
-
         pm = random.choice(methods)
         cash_val = None
         change_val = None
-
         if pm == "CASH":
             cash_val = random.choice([fin, fin + 5000, fin + 10000, fin + 20000])
             change_val = cash_val - fin
