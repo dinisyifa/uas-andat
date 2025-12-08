@@ -8,11 +8,11 @@ import random, datetime
 from tqdm import tqdm
 from app.database import DATABASE_URL, Base, get_db
 
-#password = "@Keju1234"
+#password = "kopigulaaren30"
 #password = password.replace("@", "%40")
 #DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
 
-DATABASE_URL = f"mysql+pymysql://root:Dinisyifa123%21@localhost:3306/bioskop"
+DATABASE_URL = f"mysql+pymysql://root:kopigulaaren30@localhost:3306/bioskop"
 # DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Base = declarative_base()
@@ -48,7 +48,7 @@ class Studio(Base):
     __tablename__ = "studios"
     id = Column(Integer, primary_key=True)
     code = Column(String(20), unique=True)
-    name = Column(String(100))
+    nama = Column(String(100))
     rows = Column(Integer)
     cols = Column(Integer)
 
@@ -73,10 +73,15 @@ class Jadwal(Base):
     __tablename__ = "jadwal"
     id = Column(Integer, primary_key=True)
     code = Column(String(20), unique=True)
-    movie_id = Column(Integer)
+
+    movie_id = Column(Integer, ForeignKey("movies.id"))
+    movie = relationship("Movie")
     movie_code = Column(String(20))
-    studio_id = Column(Integer)
+
+    studio_id = Column(Integer, ForeignKey("studios.id"))
+    studio = relationship("Studio")
     studio_code = Column(String(20))
+    
     tanggal = Column(Date)
     jam = Column(Time)
 
@@ -143,11 +148,28 @@ Session = sessionmaker(bind=engine)
 
 
 def main():
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    with engine.connect() as connection:
+        with connection.begin() as transaction:
+            try:
+                connection.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
+                print("INFO: Foreign Key Checks dimatikan sementara.")
+            except Exception as e:
+                print(f"PERINGATAN: Gagal mematikan FK Checks. {e}")
+            
+            Base.metadata.drop_all(connection)
+            print("INFO: Metadata drop_all berhasil dieksekusi.")
+            
+            Base.metadata.create_all(connection)
+            print("INFO: Metadata create_all berhasil dieksekusi.")
+
+            try:
+                connection.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
+                print("INFO: Foreign Key Checks diaktifkan kembali.")
+            except Exception as e:
+                print(f"PERINGATAN: Gagal mengaktifkan FK Checks. {e}")
+            
+            transaction.commit()
     db = Session()
-
-
 
     FILMS = [
         ("Avengers: Endgame", "Action, Fantasy", 200, "Anthony Russo, Joe Russo", "PG-13"),

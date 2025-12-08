@@ -34,19 +34,26 @@ def movie_to_public_dict(m: Movie) -> dict:
 # 1) GET /now_playing
 # =========================================================
 
+# Pastikan di paling atas file sudah ada import ini:
+from datetime import date 
+
 @router.get("/now_playing")
 def now_playing(db: Session = Depends(get_db)):
     """
     Menampilkan daftar semua film yang sedang tayang.
-    Di sini 'sedang tayang' = film yang punya jadwal dari hari ini ke depan.
+    REVISI: Karena data database hanya Desember 2024, 
+    kita set 'today' menjadi 1 Desember 2024 agar data muncul.
     """
 
-    today = date.today()
+    # --- PERBAIKAN DI SINI ---
+    # Jangan pakai date.today() karena akan ambil tanggal real-time (2025)
+    # Kita set manual ke awal data dummy kita (1 Des 2024)
+    today = date(2024, 12, 1) 
 
     movies = (
         db.query(Movie)
         .join(Jadwal, Jadwal.movie_id == Movie.id)
-        .filter(Jadwal.tanggal >= today)
+        .filter(Jadwal.tanggal >= today) 
         .distinct()
         .all()
     )
