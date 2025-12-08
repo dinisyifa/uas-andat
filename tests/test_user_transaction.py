@@ -1,137 +1,295 @@
+# tests/test_cart_checkout.py
 import pytest
 from fastapi.testclient import TestClient
-from fastapi import FastAPI
-from app.routers import user_transaction
-from app.routers.admin_film import list_film
-from app.routers.admin_jadwal import list_jadwal
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-app = FastAPI()
-app.include_router(user_transaction.router)
+from app.main import app                 
+from app.database import get_db
+from app.models import Base, Movie, Studio, Jadwal, Membership, Cart, OrderSeat, Order
+
+# -------------------------
+# Setup in-memory test DB
+# -------------------------
+SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# create all tables in test DB
+Base.metadata.create_all(bind=engine)
+
+# override get_db dependency to use the testing session
+def override_get_db():
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
 
+# -------------------------
+# Helper: create seed data
+# -------------------------
+def create_seed_data(db):
+    """
+    Membuat:
+      - 1 Movie (MOV001)
+      - 1 Studio (ST001)
+      - 1 Jadwal (JAD001) untuk movie+studio
+      - 1 Membership (MEM001)
+    Mengembalikan tuple (movie, studio, jadwal, member)
+    """
+    # movie
+    movie = Movie(
+        code="MOV001",
+        title="Test Movie",
+        genre="Action",
+        durasi=100,
+        director="Director",
+        rating="PG",
+        price=40000
+    )
+    db.add(movie)
+    db.flush()  # agar movie.id ter-assign
+
+    # studio
+    studio = Studio(
+        code="ST001",
+        name="Studio 1",
+        rows=10,
+        cols=8
+    )
+    db.add(studio)
+    db.flush()
+
+    # jadwal (pastikan kolom movie_id, studio_id cukup; relasi di model diharapkan ada)
+    jadwal = Jadwal(
+        code="JAD0001",
+        movie_id=movie.id,
+        movie_code=movie.code,
+        studio_id=studio.id,
+        studio_code=studio.code,
+        tanggal="2024-12-01",
+        jam="11:00:00"
+    )
+    db.add(jadwal)
+    db.flush()
+
+    member = Membership(
+        code="MEM001",
+        nama="Member A"
+    )
+    db.add(member)
+    db.commit()
+
+    # reload to get full objects
+    movie = db.query(Movie).filter_by(id=movie.id).first()
+    studio = db.query(Studio).filter_by(id=studio.id).first()
+    jadwal = db.query(Jadwal).filter_by(id=jadwal.id).first()
+    member = db.query(Membership).filter_by(id=member.id).first()
+    return movie, studio, jadwal, member
+
+
+# -------------------------
+# Fixtures
+# -------------------------
 @pytest.fixture(autouse=True)
-def setup_data():
-    """Reset semua variabel global sebelum tiap test"""
-    list_film.clear()
-    list_jadwal.clear()
-    user_transaction.cart_items.clear()
-    user_transaction.pending_orders.clear()
-    user_transaction.transaction_history.clear()
-
-    # Setup dummy film dan jadwal
-    list_film.append({
-        "id": "f1",
-        "title": "Interstellar",
-        "price": "Rp75.000"
-    })
-
-    list_jadwal.append({
-        "id_jadwal": "J1",
-        "movie_id": "f1",
-        "studio_name": "Studio 2",
-        "date": "2025-10-14",
-        "time": "20:00",
-        "seats": [
-            [{"seat": "A1", "available": True}, {"seat": "A2", "available": True}],
-            [{"seat": "B1", "available": True}, {"seat": "B2", "available": True}]
-        ]
-    })
+def setup_db():
+    # each test gets a fresh DB (recreate tables)
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    # create seed data
+    db = TestingSessionLocal()
+    try:
+        movie, studio, jadwal, member = create_seed_data(db)
+        yield {"movie": movie, "studio": studio, "jadwal": jadwal, "member": member, "db": db}
+    finally:
+        db.close()
 
 
-# ================================================================
-# TEST 1 - Tambah ke keranjang
-# ================================================================
-def test_add_ticket_success():
+# -------------------------
+# Tests
+# -------------------------
+
+def test_add_to_cart_success(setup_db):
+    jadwal = setup_db["jadwal"]
+    member = setup_db["member"]
+
     payload = {
-        "schedule_id": "J1",
-        "movie_title": "Interstellar",
-        "seat_number": "A1"
+        "membership_code": member.code,
+        "jadwal_id": jadwal.id,
+        "row": "A",
+        "col": 1
     }
     res = client.post("/cart/add", json=payload)
     assert res.status_code == 200
-    assert res.json()["message"] == "Tiket berhasil ditambahkan ke keranjang"
+    data = res.json()
+    # router returns {"message": "Berhasil masuk keranjang", "seat": "A1"}
+    assert "Berhasil masuk keranjang" in data.get("message", "") or data.get("message") == "Berhasil masuk keranjang"
+    assert data.get("seat") == "A1"
 
 
-def test_add_ticket_fail_schedule_not_found():
+def test_add_to_cart_seat_already_sold(setup_db):
+    # simulate seat already sold by inserting an OrderSeat for that jadwal,row,col
+    db = TestingSessionLocal()
+    jadwal = setup_db["jadwal"]
+    member = setup_db["member"]
+
+    # create an order and orderseat directly (so seat is "sold")
+    # create a minimal Order so that OrderSeat.order_id FK can reference it (Order model fields must match your actual model)
+    order = Order(
+        code="ORDTEST",
+        membership_id=member.id,
+        membership_code=member.code,
+        jadwal_id=jadwal.id,
+        payment_method="QRIS",
+        seat_count=1,
+        promo_name="NO PROMO",
+        discount=0,
+        total_price=40000,
+        final_price=40000,
+        cash=40000,
+        change=0,
+        transaction_date="2024-12-01",
+        hari="Senin"
+    )
+    db.add(order)
+    db.flush()
+
+    os = OrderSeat(
+        order_id=order.id,
+        jadwal_id=jadwal.id,
+        studio_id=setup_db["studio"].id,
+        row="A",
+        col=1
+    )
+    db.add(os)
+    db.commit()
+    db.close()
+
+    # now try to add same seat to cart
     payload = {
-        "schedule_id": "INVALID",
-        "movie_title": "Interstellar",
-        "seat_number": "A1"
-    }
-    res = client.post("/cart/add", json=payload)
-    assert res.status_code == 404
-    assert "Jadwal tidak ditemukan" in res.json()["detail"]
-
-
-def test_add_ticket_fail_seat_not_available():
-    # Jadikan kursi A1 unavailable
-    list_jadwal[0]["seats"][0][0]["available"] = False
-    payload = {
-        "schedule_id": "J1",
-        "movie_title": "Interstellar",
-        "seat_number": "A1"
+        "membership_code": member.code,
+        "jadwal_id": jadwal.id,
+        "row": "A",
+        "col": 1
     }
     res = client.post("/cart/add", json=payload)
     assert res.status_code == 400
-    assert "Kursi tidak tersedia" in res.json()["detail"]
+    assert res.json()["detail"] == "Kursi sudah terjual"
 
 
-# ================================================================
-# TEST 2 - Lihat dan hapus isi keranjang
-# ================================================================
-def test_view_and_remove_cart():
-    # Tambahkan item
+def test_add_to_cart_duplicate_in_cart(setup_db):
+    jadwal = setup_db["jadwal"]
+    member = setup_db["member"]
+
     payload = {
-        "schedule_id": "J1",
-        "movie_title": "Interstellar",
-        "seat_number": "A1"
+        "membership_code": member.code,
+        "jadwal_id": jadwal.id,
+        "row": "B",
+        "col": 2
     }
-    client.post("/cart/add", json=payload)
 
-    # Lihat isi keranjang
-    res_view = client.get("/cart")
-    assert res_view.status_code == 200
-    assert "items" in res_view.json()
-    assert len(res_view.json()["items"]) == 1
+    # first add
+    r1 = client.post("/cart/add", json=payload)
+    assert r1.status_code == 200
 
-    # Hapus item
-    item_id = res_view.json()["items"][0]["item_id"]
-    res_delete = client.delete(f"/cart/remove/{item_id}")
-    assert res_delete.status_code == 200
-    assert "berhasil dihapus" in res_delete.json()["message"]
-
-    # Pastikan keranjang kosong
-    res_empty = client.get("/cart")
-    assert res_empty.status_code == 404
-    assert "Keranjang kosong" in res_empty.json()["detail"]
+    # duplicate add -> should return message about already in cart
+    r2 = client.post("/cart/add", json=payload)
+    assert r2.status_code == 200
+    # router returns {"message": "Kursi sudah ada di keranjang"}
+    assert r2.json().get("message") == "Kursi sudah ada di keranjang"
 
 
-# ================================================================
-# TEST 3 - Checkout
-# ================================================================
-def test_checkout_success():
-    # Tambahkan item ke keranjang
+def test_get_cart_contents_and_total(setup_db):
+    db = TestingSessionLocal()
+    movie, studio, jadwal, member = setup_db["movie"], setup_db["studio"], setup_db["jadwal"], setup_db["member"]
+
+    # add two cart items directly (or via endpoint)
+    client.post("/cart/add", json={"membership_code": member.code, "jadwal_id": jadwal.id, "row": "C", "col": 1})
+    client.post("/cart/add", json={"membership_code": member.code, "jadwal_id": jadwal.id, "row": "C", "col": 2})
+
+    res = client.get(f"/cart/{member.code}")
+    assert res.status_code == 200
+    body = res.json()
+    # expecting items list and total_price
+    assert "items" in body
+    assert isinstance(body["items"], list)
+    assert body["total_price"] > 0
+    assert len(body["items"]) == 2
+
+
+def test_remove_cart_item_and_not_found(setup_db):
+    db = TestingSessionLocal()
+    movie, studio, jadwal, member = setup_db["movie"], setup_db["studio"], setup_db["jadwal"], setup_db["member"]
+
+    # add a cart item
+    r = client.post("/cart/add", json={"membership_code": member.code, "jadwal_id": jadwal.id, "row": "D", "col": 1})
+    assert r.status_code == 200
+
+    # get cart to find cart_id
+    res = client.get(f"/cart/{member.code}")
+    cart_items = res.json()["items"]
+    assert len(cart_items) >= 1
+    cart_id = cart_items[0]["cart_id"]
+
+    # delete
+    del_res = client.delete(f"/cart/remove/{cart_id}")
+    assert del_res.status_code == 200
+    assert del_res.json()["message"] in ("Item dihapus dari keranjang", "Item cart berhasil dihapus")
+
+    # delete again -> not found
+    del2 = client.delete(f"/cart/remove/{99999}")
+    assert del2.status_code == 404
+
+
+def test_checkout_success_non_cash_and_get_order(setup_db):
+    movie, studio, jadwal, member = setup_db["movie"], setup_db["studio"], setup_db["jadwal"], setup_db["member"]
+
+    # add two seats
+    client.post("/cart/add", json={"membership_code": member.code, "jadwal_id": jadwal.id, "row": "E", "col": 1})
+    client.post("/cart/add", json={"membership_code": member.code, "jadwal_id": jadwal.id, "row": "E", "col": 2})
+
     payload = {
-        "schedule_id": "J1",
-        "movie_title": "Interstellar",
-        "seat_number": "A1"
+        "membership_code": member.code,
+        "payment_method": "QRIS"
     }
-    client.post("/cart/add", json=payload)
+    res = client.post("/checkout", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert "order_code" in data
+    assert data["total_seat"] == 2
+    assert data["status"] == "SUCCESS"
 
-    # Pilih metode pembayaran
-    res_checkout = client.post("/checkout/payment", json={"payment_method": "Transfer Bank"})
-    assert res_checkout.status_code == 200
-    data = res_checkout.json()
-    assert data["order_id"].startswith("ORD-")
-    assert data["payment_method"] == "Transfer Bank"
-    assert data["total_price"] > 0
+    # check that cart is now empty
+    c_after = client.get(f"/cart/{member.code}").json()
+    assert c_after["items"] == [] or c_after.get("total_price", 0) == 0
 
-    # Pastikan keranjang dikosongkan
-    assert user_transaction.cart_items == []
+    # get order detail
+    order_code = data["order_code"]
+    get_order = client.get(f"/order/{order_code}")
+    assert get_order.status_code == 200
+    od = get_order.json()
+    assert od["order_code"] == order_code
+    assert od["status"].startswith("Pesanan")
 
 
-def test_checkout_empty_cart():
-    res_checkout = client.post("/checkout/payment", json={"payment_method": "Transfer Bank"})
-    assert res_checkout.status_code == 400
-    assert "Keranjang belanja kosong" in res_checkout.json()["detail"]
+def test_checkout_cash_insufficient(setup_db):
+    movie, studio, jadwal, member = setup_db["movie"], setup_db["studio"], setup_db["jadwal"], setup_db["member"]
+
+    # add one seat
+    client.post("/cart/add", json={"membership_code": member.code, "jadwal_id": jadwal.id, "row": "F", "col": 1})
+
+    # payload with cash less than final_price
+    payload = {
+        "membership_code": member.code,
+        "payment_method": "CASH",
+        "cash_amount": 100  # surely insufficient
+    }
+    res = client.post("/checkout", json=payload)
+    assert res.status_code == 400
+    assert res.json()["detail"] == "Uang tunai kurang"
