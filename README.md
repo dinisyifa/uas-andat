@@ -6,7 +6,7 @@
 ![MySQL](https://img.shields.io/badge/Database-MySQL-orange?style=for-the-badge&logo=mysql&logoColor=white)
 ![Pytest](https://img.shields.io/badge/Testing-Pytest-yellow?style=for-the-badge&logo=pytest&logoColor=black)
 
-API Backend yang kuat untuk sistem manajemen bioskop. Proyek ini mencakup fitur lengkap mulai dari manajemen film oleh admin, transaksi pemesanan tiket oleh user, hingga analisis data bisnis (Business Intelligence).
+Proyek ini mencakup fitur lengkap mulai dari manajemen film oleh admin, transaksi pemesanan tiket oleh user, hingga analisis data bisnis.
 
 ---
 
