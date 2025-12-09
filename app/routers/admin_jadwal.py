@@ -35,9 +35,6 @@ def generate_schedule_code(db: Session):
 
 @router.get("", response_model=list[ScheduleOut])
 def get_schedules(db: Session = Depends(get_db)):
-    """
-    Mengambil daftar semua jadwal dengan Query Manual yang aman (tanpa bergantung pada FK di DB).
-    """
     schedules = db.query(Jadwal).all()
     output = []
 
@@ -67,12 +64,27 @@ def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
     # cek movie
     movie = db.query(Movie).filter(Movie.code == item.movie_code).first()
     if not movie:
-        raise HTTPException(404, "Movie tidak ditemukan")
+        raise HTTPException(404, f"Movie code {item.movie_code} tidak ditemukan.")
 
     # cek studio
     studio = db.query(Studio).filter(Studio.code == item.studio_code).first()
     if not studio:
-        raise HTTPException(404, "Studio tidak ditemukan")
+        raise HTTPException(404, f"Studio code {item.studio_code} tidak ditemukan.")
+
+    # Cek Konflik Waktu (Konflik pada hari yang sama di studio yang sama)
+    conflict = db.query(Jadwal).filter(
+        Jadwal.studio_id == studio.id,
+        Jadwal.tanggal == item.tanggal,
+        Jadwal.end_time > item.jam,          
+        Jadwal.jam < end_time            
+    ).first()
+
+    if conflict:
+        # Tampilkan informasi jadwal yang bentrok
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Jadwal bentrok di Studio {studio.name} pada {conflict.jam.isoformat()} s/d {conflict.end_time.isoformat()}"
+        )
 
     new_code = generate_schedule_code(db)
 
@@ -81,7 +93,8 @@ def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
         movie_code=item.movie_code,
         studio_code=item.studio_code,
         tanggal=item.tanggal,
-        jam=item.jam
+        jam=item.jam,
+        end_time=item.end_time
     )
 
     db.add(schedule)

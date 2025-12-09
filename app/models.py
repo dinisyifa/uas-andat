@@ -57,7 +57,8 @@ class StudioSeat(Base):
     studio_id = Column(Integer)
     row = Column(String(3))
     col = Column(Integer)
-    __table_args__ = (UniqueConstraint("studio_id", "row", "col"),)
+    __table_args__ = (
+    UniqueConstraint("studio_id", "row", "col", name="unique_seat_per_studio"),)
 
 
 class Membership(Base):
@@ -123,7 +124,7 @@ class Cart(Base):
     studio_id = Column(Integer)
     row = Column(String(3))
     col = Column(Integer)
-    __table_args__ = (UniqueConstraint("membership_id", "jadwal_id", "row", "col"),)
+    __table_args__ = (UniqueConstraint("membership_id", "jadwal_id", "row", "col"))
 
 
 def price(dur):
