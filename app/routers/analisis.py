@@ -7,9 +7,9 @@ from sqlalchemy import text
 
 router = APIRouter()
 
-# ==============================================================================
+
 # 1. ANALISIS EFEKTIVITAS PROMO (FINAL)
-# ==============================================================================
+
 
 def hasil_kesimpulan(t_change, p_change, h_change):
     """Menerjemahkan persentase perubahan menjadi kalimat kesimpulan."""
@@ -109,9 +109,9 @@ def analisis_efektivitas_promo(db: Session = Depends(get_db)):
     }
 
 
-# ==============================================================================
+
 # 2. KURSI PALING POPULER (FINAL: FIXED QUERY STABILITY)
-# ==============================================================================
+
 
 # Fungsi utilitas untuk kueri Top 5 Kursi
 def get_top5_kursi_query(start_date: date, end_date: date):

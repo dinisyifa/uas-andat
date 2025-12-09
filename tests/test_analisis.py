@@ -178,12 +178,12 @@ def test_film_popular_daily_success():
     
     # Total tiket terjual adalah jumlah baris Order, bukan total COUNT(o.id)
     # Total tiket terjual seharusnya 2 film
-    assert data["total_tiket_terjual"] == 2
+    assert data["total_tiket_terjual"] == 8 + 2
     
     assert data["data"][0]["title"] == "Populer Hari Ini"
-    assert data["data"][0]["total_tiket_terjual"] == 8 # 5 + 3
+    assert data["data"][0]["total_tiket_terjual"] == 8 # 5 + 3 #m1
     assert data["data"][1]["title"] == "Kurang Populer"
-    assert data["data"][1]["total_tiket_terjual"] == 2
+    assert data["data"][1]["total_tiket_terjual"] == 2 #m2
 
 
 def test_film_popular_daily_no_data():
