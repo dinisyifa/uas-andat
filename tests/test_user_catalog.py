@@ -8,6 +8,10 @@ from app.models import Movie, Jadwal, Studio, StudioSeat, OrderSeat, Cart
 client = TestClient(app)
 
 
+# ============================================================
+# HELPERS (untuk memastikan data ada)
+# ============================================================
+
 def ensure_minimal_data():
     db = SessionLocal()
 
@@ -76,6 +80,7 @@ def db():
         session.close()
 
 
+
 def test_now_playing(db):
     response = client.get("/now_playing")
     assert response.status_code == 200
@@ -83,6 +88,7 @@ def test_now_playing(db):
     json = response.json()
     assert "data" in json
     assert json["count"] >= 1
+
 
 
 def test_movie_details(db):
@@ -100,6 +106,7 @@ def test_movie_details(db):
 def test_movie_details_not_found():
     response = client.get("/now_playing/MOV999/details")
     assert response.status_code == 404
+
 
 
 def test_seat_map(db):
@@ -143,7 +150,6 @@ def test_seat_status_booked_and_cart(db):
         db.delete(existing_movie)
 
     db.commit() 
-    
 
     movie = Movie(
         code=movie_code,
@@ -193,6 +199,7 @@ def test_seat_status_booked_and_cart(db):
 
     assert "X" in disp 
     assert "~" in disp
+
 
     db.delete(order_seat)
     db.delete(cart_item)
