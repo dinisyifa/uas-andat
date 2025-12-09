@@ -8,17 +8,14 @@ from app.models import Movie, Jadwal, Studio, StudioSeat, OrderSeat, Cart
 client = TestClient(app)
 
 
-# ============================================================
-# HELPERS (untuk memastikan data ada)
-# ============================================================
-
 def ensure_minimal_data():
     db = SessionLocal()
 
     movie = db.query(Movie).first()
     if not movie:
         movie = Movie(
-            code="MOV001", # <-- Hapus id=1
+            id=1,
+            code="MOV001",
             title="Film Uji",
             genre="Action",
             durasi=120,
@@ -33,7 +30,8 @@ def ensure_minimal_data():
     studio = db.query(Studio).first()
     if not studio:
         studio = Studio(
-            code="ST001", # <-- Hapus id=1
+            id=1,
+            code="ST001",
             name="Studio 1",
             rows=3,
             cols=4
@@ -41,14 +39,19 @@ def ensure_minimal_data():
         db.add(studio)
         db.commit()
         db.refresh(studio)
-    
-    # ... (lanjutkan untuk StudioSeat dan Jadwal)
-    
-    # Untuk Jadwal
+
+    seats = db.query(StudioSeat).filter(StudioSeat.studio_id == studio.id).all()
+    if not seats:
+        for r in ["A", "B", "C"]:
+            for c in range(1, 5):
+                db.add(StudioSeat(studio_id=studio.id, row=r, col=c))
+        db.commit()
+
     jadwal = db.query(Jadwal).filter(Jadwal.movie_id == movie.id).first()
     if not jadwal:
         jadwal = Jadwal(
-            code="JAD001", # <-- Hapus id=1
+            id=1,
+            code="JAD001",
             studio_id=studio.id,
             movie_id=movie.id,
             tanggal=date(2024, 12, 1),
@@ -57,13 +60,6 @@ def ensure_minimal_data():
         db.add(jadwal)
         db.commit()
         db.refresh(jadwal)
-    
-    seats = db.query(StudioSeat).filter(StudioSeat.studio_id == studio.id).all()
-    if not seats:
-        for r in ["A", "B", "C"]:
-            for c in range(1, 5):
-                db.add(StudioSeat(studio_id=studio.id, row=r, col=c))
-        db.commit()
 
     db.close()
     return movie, studio, jadwal
@@ -80,10 +76,6 @@ def db():
         session.close()
 
 
-# ============================================================
-# 1) TEST GET /now_playing
-# ============================================================
-
 def test_now_playing(db):
     response = client.get("/now_playing")
     assert response.status_code == 200
@@ -92,10 +84,6 @@ def test_now_playing(db):
     assert "data" in json
     assert json["count"] >= 1
 
-
-# ============================================================
-# 2) TEST GET /now_playing/{movie_code}/details
-# ============================================================
 
 def test_movie_details(db):
     movie = db.query(Movie).first()
@@ -114,10 +102,6 @@ def test_movie_details_not_found():
     assert response.status_code == 404
 
 
-# ============================================================
-# 3) TEST GET /schedules/{jadwal_code}/seats
-# ============================================================
-
 def test_seat_map(db):
     jadwal = db.query(Jadwal).first()
 
@@ -135,14 +119,34 @@ def test_seat_map_not_found():
     assert response.status_code == 404
 
 
-# ============================================================
-# 4) TEST STATUS KURSI (booked dan cart)
-# ============================================================
 
 def test_seat_status_booked_and_cart(db):
+    
+    movie_code = "MOV100"
+    studio_code = "ST100"
+    jadwal_code = "JAD100"
+    
+    existing_jadwal = db.query(Jadwal).filter(Jadwal.code == jadwal_code).first()
+    existing_studio = db.query(Studio).filter(Studio.code == studio_code).first()
+    
+    if existing_jadwal:
+        db.query(OrderSeat).filter(OrderSeat.jadwal_id == existing_jadwal.id).delete()
+        db.query(Cart).filter(Cart.jadwal_id == existing_jadwal.id).delete()
+        db.delete(existing_jadwal)
+
+    if existing_studio:
+        db.query(StudioSeat).filter(StudioSeat.studio_id == existing_studio.id).delete()
+        db.delete(existing_studio)
+    
+    existing_movie = db.query(Movie).filter(Movie.code == movie_code).first()
+    if existing_movie:
+        db.delete(existing_movie)
+
+    db.commit() 
+    
 
     movie = Movie(
-        code="MOV100",
+        code=movie_code,
         title="Test Film",
         durasi=120,
         price=50000,
@@ -154,13 +158,13 @@ def test_seat_status_booked_and_cart(db):
     db.commit()
     db.refresh(movie)
 
-    studio = Studio(code="ST100", name="Studio 1", rows=1, cols=2)
+    studio = Studio(code=studio_code, name="Studio 1", rows=1, cols=2)
     db.add(studio)
     db.commit()
     db.refresh(studio)
 
     jadwal = Jadwal(
-        code="JAD100",
+        code=jadwal_code,
         movie_id=movie.id,
         studio_id=studio.id,
         tanggal=date(2024, 12, 1),
@@ -175,9 +179,11 @@ def test_seat_status_booked_and_cart(db):
     db.add_all([s1, s2])
     db.commit()
 
-    db.add(OrderSeat(jadwal_id=jadwal.id, row="A", col=1))
-    db.add(Cart(jadwal_id=jadwal.id, row="A", col=2))
+    order_seat = OrderSeat(jadwal_id=jadwal.id, row="A", col=1) 
+    cart_item = Cart(jadwal_id=jadwal.id, row="A", col=2) 
+    db.add_all([order_seat, cart_item])
     db.commit()
+
 
     response = client.get(f"/schedules/{jadwal.code}/seats")
     assert response.status_code == 200
@@ -185,5 +191,14 @@ def test_seat_status_booked_and_cart(db):
     data = response.json()
     disp = "\n".join(data["display"])
 
-    assert "X" in disp  # booked
-    assert "~" in disp  # cart
+    assert "X" in disp 
+    assert "~" in disp
+
+    db.delete(order_seat)
+    db.delete(cart_item)
+    db.delete(s1) 
+    db.delete(s2) 
+    db.delete(jadwal)
+    db.delete(studio)
+    db.delete(movie)
+    db.commit()

@@ -315,46 +315,46 @@ def analisis_efektivitas_promo(db: Session = Depends(get_db)):
 # 4. Kursi paling populer
 @router.get("/analisis/kursipopuler/{mode}")
 def kursi_paling_populer(
-    mode: str = Path(..., description="Periode analisis: harian | mingguan | bulanan"), # Gunakan Path untuk deskripsi di Swagger
-    tanggal: str = Query(None, description="Tanggal dasar (YYYY-MM-DD). Default: hari ini."), # Gunakan Query untuk deskripsi di Swagger
+    mode: str = Path(..., description="Periode analisis: harian | mingguan | bulanan"), 
+    tanggal: str = Query(None, description="Tanggal dasar (YYYY-MM-DD). Default: hari ini."), 
     db: Session = Depends(get_db)
 ):
     print("🔍 Mode diterima:", mode)
 
     if mode not in ["harian", "mingguan", "bulanan"]:
-        print("❌ Mode invalid")
+        print("Mode invalid")
         raise HTTPException(status_code=400, detail="Mode harus harian, mingguan, atau bulanan.")
 
-    # Tanggal
+    
     try:
         if tanggal:
             tgl = datetime.strptime(tanggal, "%Y-%m-%d").date()
         else:
             tgl = date.today()
-        print("📅 Tanggal dasar:", tgl)
+        print("Tanggal dasar:", tgl)
     except Exception as e:
-        print("❌ Parsing tanggal error:", e)
+        print("Parsing tanggal error:", e)
         raise HTTPException(status_code=400, detail="Format tanggal salah. Gunakan YYYY-MM-DD.")
 
-    # Tentukan Range
+
     if mode == "harian":
         start = tgl
         end = tgl
     elif mode == "mingguan":
-        # ... (Logika penentuan tanggal mingguan tetap sama dan sudah benar)
+
         start = tgl - timedelta(days=tgl.weekday())
         end = start + timedelta(days=6)
-    else: # mode == "bulanan"
-        # ... (Logika penentuan tanggal bulanan tetap sama dan sudah benar)
+    else: 
+
         start = tgl.replace(day=1)
         if start.month == 12:
             end = date(start.year, 12, 31)
         else:
             end = date(start.year, start.month + 1, 1) - timedelta(days=1)
 
-    print("📌 Rentang query:", start, "→", end)
+    print("Rentang query:", start, "→", end)
 
-    # Query ke DB
+
     try:
         query = text("""
             SELECT 
@@ -373,11 +373,11 @@ def kursi_paling_populer(
             "end_date": end.isoformat()
         }).mappings().all()
 
-        print("🎯 DB Result:", result)
+        print("DB Result:", result)
 
     except Exception as e:
-        print("🔥 SQL ERROR:", e)
-        # Anda mungkin ingin menampilkan e dalam log server, tetapi hindari mengirimkannya langsung ke pengguna.
+        print("SQL ERROR:", e)
+
         raise HTTPException(status_code=500, detail="SQL bermasalah atau data tidak ada.")
 
     return {

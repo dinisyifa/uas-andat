@@ -8,11 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models import Membership, Movie, Studio, Jadwal, StudioSeat, Cart, OrderSeat
 
 
-# =============================
-#  SETUP DATABASE TEST
-# =============================
-
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test_cart.db"
+SQLALCHEMY_DATABASE_URL = "sqlite:///./app.db"
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
@@ -39,9 +35,7 @@ app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
 
-# =============================
-#  FIXTURES DATA AWAL
-# =============================
+
 @pytest.fixture(scope="module", autouse=True)
 def seed_data():
     db = TestingSessionLocal()
@@ -68,7 +62,7 @@ def seed_data():
     db.commit()
     db.refresh(jadwal)
 
-    # buat kursi mock 4 seat
+
     seats = [
         StudioSeat(studio_id=studio.id, row="A", col=i)
         for i in range(1, 5)
@@ -79,9 +73,7 @@ def seed_data():
     return True
 
 
-# =============================
-#  1️⃣ TEST ADD TO CART
-# =============================
+
 def test_add_to_cart_success():
     payload = {
         "membership_code": "MEM001",
@@ -94,28 +86,24 @@ def test_add_to_cart_success():
     assert res.json()["message"] == "Tiket berhasil ditambahkan"
 
 
-# =============================
-#  2️⃣ TEST GET CART MEMBERSHIP
-# =============================
+
 def test_get_cart_items():
     res = client.get("/cart/MEM001")
     data = res.json()
 
     assert res.status_code == 200
-    # PERBAIKAN: Ganti 'final_price' menjadi 'total_price'
+
     assert data["total_price"] == 50000 
     assert len(data["items"]) == 1
     assert data["items"][0]["movie_title"] == "Avatar"
 
 
 global created_order_code
-created_order_code = "" # Inisialisasi
+created_order_code = "" 
 
-# =============================
-#  3️⃣ TEST CHECKOUT
-# =============================
+
 def test_checkout_cart_cash():
-    global created_order_code # Tambahkan ini di awal fungsi
+    global created_order_code 
     payload = {
         "membership_code": "MEM001",
         "payment_method": "CASH",
@@ -131,20 +119,15 @@ def test_checkout_cart_cash():
     assert body["change"] == 50000
     assert body["status"] == "PAID"
 
-    # Variabel global 'created_order_code' sudah dideklarasikan di level module
     created_order_code = body["order_code"]
 
-# =============================
-#  4️⃣ TEST CART KOSONG SETELAH CHECKOUT
-# =============================
+
 def test_cart_is_empty_after_checkout():
     res = client.get("/cart/MEM001")
     assert res.json()["total"] == 0
 
 
-# =============================
-#  5️⃣ ORDER SEAT BENAR2 PINDAH
-# =============================
+
 def test_order_seat_move_db():
     db = TestingSessionLocal()
     seats = db.query(OrderSeat).all()
@@ -152,15 +135,12 @@ def test_order_seat_move_db():
     db.close()
 
 
-# =============================
-#  6️⃣ GET ORDER DETAIL BERHASIL
-# =============================
+
 def test_get_order_detail():
-    # PERBAIKAN: Gunakan variabel global created_order_code yang berisi kode order.
-    # OrderResponse adalah kelas Pydantic, bukan kode order.
+
     global created_order_code
     res = client.get(f"/order/{created_order_code}") 
     
     assert res.status_code == 200
-    # PERBAIKAN: Cek dengan created_order_code yang sebenarnya
+
     assert res.json()["order_code"] == created_order_code

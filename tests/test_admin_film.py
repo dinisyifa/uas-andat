@@ -24,10 +24,6 @@ def db_session():
     yield db
     db.close()
 
-# ======================================================
-# MOVIES CRUD TESTS
-# ======================================================
-
 def test_add_movie(db_session):
     res = client.post("/movies", json={
         "title": "Avatar",
@@ -94,10 +90,6 @@ def test_delete_movie(db_session):
     assert res.status_code == 200
 
 
-# ======================================================
-# STUDIOS CRUD TESTS
-# ======================================================
-
 def test_add_studio(db_session):
     res = client.post("/studios", json={"rows": 8, "cols": 12})
     assert res.status_code == 200
@@ -131,7 +123,6 @@ def test_delete_studio(db_session):
     db_session.add(Studio(id=1, code="ST001", name="Studio 1", rows=8, cols=12))
     db_session.commit()
 
-    # Bersihkan FK dulu
     db_session.query(Jadwal).delete()
     db_session.commit()
 
@@ -139,9 +130,6 @@ def test_delete_studio(db_session):
     assert res.status_code == 200
 
 
-# ======================================================
-# MEMBERS CRUD TESTS
-# ======================================================
 
 def test_add_membership(db_session):
     res = client.post("/members", json={"nama": "John"})

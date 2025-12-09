@@ -90,8 +90,8 @@ def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
         code=schedule.code,
         movie_code=schedule.movie_code,
         studio_code=schedule.studio_code,
-        tanggal=schedule.tanggal,
-        jam=schedule.jam,
+        tanggal=str(schedule.tanggal),
+        jam=str(schedule.jam),
         movie_title=movie.title,
         studio_name=studio.name
     )
@@ -124,8 +124,8 @@ def update_schedule(code: str, item: ScheduleInput, db: Session = Depends(get_db
         code=schedule.code,
         movie_code=schedule.movie_code,
         studio_code=schedule.studio_code,
-        tanggal=schedule.tanggal,
-        jam=schedule.jam,
+        tanggal=str(schedule.tanggal),
+        jam=str(schedule.jam),
         movie_title=movie.title,
         studio_name=studio.name
     )
