@@ -1,6 +1,6 @@
 # app/main.py
 from fastapi import FastAPI
-from app.routers import admin_film, user_transaction, admin_jadwal, user_catalog, analisis
+from app.routers import admin_film, admin_jadwal, user_catalog, user_transaction, analisis
 from app.database import engine, Base
 import app.models
 Base.metadata.create_all(bind=engine)

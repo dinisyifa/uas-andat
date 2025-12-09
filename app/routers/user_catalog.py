@@ -1,26 +1,19 @@
-# app/routers/user_catalog.py
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import date
 from typing import List
-
 from app.database import get_db
 from app.models import Movie, Jadwal, Studio, StudioSeat, OrderSeat, Cart
 
 router = APIRouter()
 
-# =========================================================
-# Helper konversi Movie -> dict ala UTS
-# =========================================================
-
 def movie_to_public_dict(m: Movie) -> dict:
     """
     Bentuk JSON mirip versi list_film UTS:
-    id, title, duration, price, genre, rating_usia, sutradara
+    code, title, duration, price, genre, rating_usia, sutradara
     """
     return {
-        "id": m.code,          # pakai code, misal "MOV001"
+        "code": m.code,         
         "title": m.title,
         "duration": m.durasi,
         "price": m.price,
@@ -33,21 +26,10 @@ def movie_to_public_dict(m: Movie) -> dict:
 # =========================================================
 # 1) GET /now_playing
 # =========================================================
-
-# Pastikan di paling atas file sudah ada import ini:
-from datetime import date 
-
 @router.get("/now_playing")
 def now_playing(db: Session = Depends(get_db)):
-    """
-    Menampilkan daftar semua film yang sedang tayang.
-    REVISI: Karena data database hanya Desember 2024, 
-    kita set 'today' menjadi 1 Desember 2024 agar data muncul.
-    """
 
-    # --- PERBAIKAN DI SINI ---
-    # Jangan pakai date.today() karena akan ambil tanggal real-time (2025)
-    # Kita set manual ke awal data dummy kita (1 Des 2024)
+    # dummy di tanggal 1 Des 2024
     today = date(2024, 12, 1) 
 
     movies = (
@@ -74,22 +56,22 @@ def now_playing(db: Session = Depends(get_db)):
 
 
 # =========================================================
-# 2) GET /now_playing/{movie_id}/details
-#    movie_id = Movie.code (misal: MOV001)
+# 2) GET /now_playing/{movie_code}/details
+#    movie_code = Movie.code (misal: MOV001)
 # =========================================================
 
-@router.get("/now_playing/{movie_id}/details")
-def detail_film(movie_id: str, db: Session = Depends(get_db)):
+@router.get("/now_playing/{movie_code}/details")
+def detail_film(movie_code: str, db: Session = Depends(get_db)):
     """
     Menampilkan detail film + semua jadwal tayangnya.
-    Path param movie_id diasumsikan = Movie.code (contoh: MOV001).
+    Path param movie_code diasumsikan = Movie.code (contoh: MOV001).
     """
 
-    movie = db.query(Movie).filter(Movie.code == movie_id).first()
+    movie = db.query(Movie).filter(Movie.code == movie_code).first()
     if not movie:
         raise HTTPException(
             status_code=404,
-            detail=f"Film dengan ID {movie_id} tidak ditemukan."
+            detail=f"Film dengan kode {movie_code} tidak ditemukan."
         )
 
     # ambil semua jadwal film ini + join studio
@@ -105,7 +87,7 @@ def detail_film(movie_id: str, db: Session = Depends(get_db)):
     for j, st in rows:
         schedules.append(
             {
-                "id_jadwal": j.code,                     # "JAD0001"
+                "jadwal_code": j.code,                     # "JAD0001"
                 "studio": st.name,                       # "Studio 1"
                 "tanggal": j.tanggal.isoformat(),        # "2024-12-01"
                 "waktu": j.jam.strftime("%H:%M"),        # "19:00"
@@ -191,22 +173,22 @@ def build_seat_display(
 
 
 # =========================================================
-# 3) GET /schedules/{schedule_id}/seats
-#    schedule_id = Jadwal.code (misal: JAD0001)
+# 3) GET /schedules/{jadwal_code}/seats
+#    jadwal_code = Jadwal.code (misal: JAD0001)
 # =========================================================
 
-@router.get("/schedules/{schedule_id}/seats")
-def denah_kursi(schedule_id: str, db: Session = Depends(get_db)):
+@router.get("/schedules/{jadwal_code}/seats")
+def denah_kursi(jadwal_code: str, db: Session = Depends(get_db)):
     """
     Menampilkan peta kursi berdasarkan jadwal.
-    schedule_id diasumsikan = Jadwal.code (contoh: JAD0001).
+    jadwal_code diasumsikan = Jadwal.code (contoh: JAD0001).
     """
 
-    jadwal = db.query(Jadwal).filter(Jadwal.code == schedule_id).first()
+    jadwal = db.query(Jadwal).filter(Jadwal.code == jadwal_code).first()
     if not jadwal:
         raise HTTPException(
             status_code=404,
-            detail=f"Jadwal dengan ID {schedule_id} tidak ditemukan."
+            detail=f"Jadwal dengan kode {jadwal_code} tidak ditemukan."
         )
 
     studio = db.query(Studio).filter(Studio.id == jadwal.studio_id).first()
@@ -244,7 +226,7 @@ def denah_kursi(schedule_id: str, db: Session = Depends(get_db)):
     display = build_seat_display(studio, studio_seats, booked_set, cart_set)
 
     return {
-        "schedule_id": schedule_id,
+        "jadwal_code": jadwal_code,
         "movie_title": movie.title,
         "studio": studio.name,
         "display": display

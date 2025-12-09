@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import date, datetime
+from sqlalchemy import func, desc, extract
+from datetime import date, datetime, timedelta
+from typing import Optional, List
 
 from app.database import get_db
 from sqlalchemy import text
+from app.models import Movie, Order, Membership, Jadwal
 
 router = APIRouter()
 
@@ -14,332 +17,734 @@ MONTH_NAMES = {
 
 
 # 1. Film paling populer
-@router.get("/filmpopuler/daily")
-def film_popular_daily(day: int, db: Session = Depends(get_db)):
+@router.get("/analisis/filmpopuler")
+def film_popular(
+    periode: str,
+    hari: int = None,
+    bulan: str = None,
+    db: Session = Depends(get_db)
+):
+    """Film yang paling populer ditunjukkan dari total penjualan tiket terbanyak.
+    Pilih periode: harian, mingguan, bulanan.
+    """
+    
+    periode = periode.lower()
 
-    # Semua data kamu ada di bulan Desember 2024
-    tanggal = date(2024, 12, day)
-
-    query = text("""
-        SELECT 
-            m.id,
-            m.title,
-            COUNT(o.id) AS total_tiket_terjual
-        FROM orders o
-        JOIN jadwal j ON o.jadwal_id = j.id
-        JOIN movies m ON j.movie_id = m.id
-        WHERE o.transaction_date = :tanggal
-        GROUP BY m.id, m.title
-        ORDER BY total_tiket_terjual DESC;
-    """)
-
-    result = db.execute(query, {"tanggal": tanggal}).mappings().all()
-
-    return {
-        "tanggal": tanggal.isoformat(),
-        "total_tiket_terjual": len(result),
-        "data": result
-    }
-
-
-@router.get("/filmpopuler/weekly")
-def film_popular_weekly(db: Session = Depends(get_db)):
+    if periode not in ["harian", "mingguan", "bulanan"]:
+        return {"error": "periode harus: harian | mingguan | bulanan"}
 
     year = 2024
     month = 12
-    results = []
 
-    # pembagian minggu bulanan: 1–7, 8–14, 15–21, 22–28, 29–31
-    minggu_ranges = [
-        (1, 7),
-        (8, 14),
-        (15, 21),
-        (22, 28),
-        (29, 31),
-    ]
-
-    for i, (start_day, end_day) in enumerate(minggu_ranges, start=1):
-        start_date = date(year, month, start_day)
-        end_date = date(year, month, end_day)
+    if periode == "harian":
+        if not hari:
+            return {"error": "Parameter 'hari' wajib untuk harian"}
+        
+        tanggal = date(year, month, hari)
 
         query = text("""
-            SELECT 
-                m.id,
-                m.title,
-                COUNT(o.id) AS total_tiket_terjual
+            SELECT m.id, m.title, COUNT(o.id) AS total
             FROM orders o
             JOIN jadwal j ON o.jadwal_id = j.id
             JOIN movies m ON j.movie_id = m.id
-            WHERE o.transaction_date BETWEEN :start_date AND :end_date
+            WHERE o.transaction_date = :tanggal
             GROUP BY m.id, m.title
-            ORDER BY total_tiket_terjual DESC;
+            ORDER BY total DESC;
         """)
 
-        films = db.execute(query, {
-            "start_date": start_date,
-            "end_date": end_date
-        }).mappings().all()
+        data = db.execute(query, {"tanggal": tanggal}).mappings().all()
 
-        hasil_mingguan = {
-            "minggu": i,
-            "range_tanggal": f"{start_date.isoformat()} s/d {end_date.isoformat()}",
-            "film_terlaris": films[0] if films else None,
-            "data": films
+        return {"periode": "harian", "tanggal": tanggal.isoformat(), "data": data}
+
+    # MINGGUAN
+    if periode == "mingguan":
+        minggu_ranges = [(1,7),(8,14),(15,21),(22,28),(29,31)]
+        hasil = []
+
+        for i,(s,e) in enumerate(minggu_ranges,start=1):
+            start = date(year, month, s)
+            end = date(year, month, e)
+
+            query = text("""
+                SELECT m.id, m.title, COUNT(o.id) AS total
+                FROM orders o
+                JOIN jadwal j ON o.jadwal_id = j.id
+                JOIN movies m ON j.movie_id = m.id
+                WHERE o.transaction_date BETWEEN :s AND :e
+                GROUP BY m.id, m.title
+                ORDER BY total DESC;
+            """)
+
+            rows = db.execute(query, {"s": start, "e": end}).mappings().all()
+            hasil.append({
+                "minggu_ke": i,
+                "periode": f"{start} s/d {end}",
+                "film_terlaris": rows[0] if rows else None,
+                "data": rows
+            })
+
+        return {"periode": "mingguan", "data": hasil}
+
+    # BULANAN
+    if periode == "bulanan":
+        if not bulan:
+            return {"error": "Parameter 'bulan' wajib untuk bulanan"}
+
+        bln = bulan.lower()
+        if bln not in MONTH_NAMES:
+            return {"error": "Nama bulan tidak valid!"}
+
+        month_number = MONTH_NAMES[bln]
+        start = date(year, month_number, 1)
+        end = date(year + 1, 1, 1) if month_number == 12 else date(year, month_number+1, 1)
+
+        query = text("""
+            SELECT m.id, m.title, COUNT(o.id) AS total
+            FROM orders o
+            JOIN jadwal j ON o.jadwal_id = j.id
+            JOIN movies m ON j.movie_id = m.id
+            WHERE o.transaction_date >= :start AND o.transaction_date < :end
+            GROUP BY m.id, m.title
+            ORDER BY total DESC;
+        """)
+
+        rows = db.execute(query, {"start": start, "end": end}).mappings().all()
+
+        return {
+            "periode": "bulanan",
+            "bulan": bulan,
+            "film_terlaris": rows[0] if rows else None,
+            "data": rows
         }
-
-        results.append(hasil_mingguan)
-
-    return {
-        "bulan": "Desember 2024",
-        "total_minggu": len(results),
-        "hasil": results
-    }
-
-
-@router.get("/filmpopuler/monthly")
-def film_popular_monthly(bulan: str, db: Session = Depends(get_db)):
-
-    bulan_lower = bulan.lower()
-
-    if bulan_lower not in MONTH_NAMES:
-        return {"error": "Nama bulan tidak valid!"}
-
-    month_number = MONTH_NAMES[bulan_lower]
-    year = 2024     # data kamu fix ada di 2024
-
-    start_date = date(year, month_number, 1)
-
-    # tentukan akhir bulan
-    if month_number == 12:
-        end_date = date(year + 1, 1, 1)
-    else:
-        end_date = date(year, month_number + 1, 1)
-
-    query = text("""
-        SELECT 
-            m.id,
-            m.title,
-            COUNT(o.id) AS total_tiket_terjual
-        FROM orders o
-        JOIN jadwal j ON o.jadwal_id = j.id
-        JOIN movies m ON j.movie_id = m.id
-        WHERE o.transaction_date >= :start_date
-        AND o.transaction_date < :end_date
-        GROUP BY m.id, m.title
-        ORDER BY total_tiket_terjual DESC;
-    """)
-
-    result = db.execute(query, {
-        "start_date": start_date,
-        "end_date": end_date
-    }).mappings().all()
-
-    return {
-        "bulan": bulan,
-        "total_film": len(result),
-        "film_terlaris": result[0] if result else None,
-        "data": result
-    }
 
 
 # 2. Jam tayang paling populer
-@router.get("/jamtayangpopuler/daily")
-def jamtayang_daily(day: int, db: Session = Depends(get_db)):
+@router.get("/analisis/jamtayangpopuler")
+def jam_tayang_populer(
+    periode: str,
+    hari: int = None,
+    bulan: str = None,
+    db: Session = Depends(get_db)
+):
 
-    tanggal = date(2024, 12, day)
+    """Jam tayang yang paling populer ditunjukkan dari total penjualan tiket terbanyak.
+    Pilih periode: harian, mingguan, bulanan.
+    """
 
-    query = text("""
-        SELECT
-            m.id AS movie_id,
-            m.title,
-            j.jam,
-            COUNT(o.id) AS total_tiket
-        FROM orders o
-        JOIN jadwal j ON o.jadwal_id = j.id
-        JOIN movies m ON j.movie_id = m.id
-        WHERE o.transaction_date = :tanggal
-        GROUP BY m.id, m.title, j.jam
-        ORDER BY m.id, total_tiket DESC;
-    """)
-
-    rows = db.execute(query, {"tanggal": tanggal}).mappings().all()
-
-    output = {}
-    for r in rows:
-        mid = r["movie_id"]
-        if mid not in output:
-            output[mid] = {
-                "movie_id": mid,
-                "title": r["title"],
-                "list_jadwal": [],
-            }
-        output[mid]["list_jadwal"].append({
-            "jam": str(r["jam"]),
-            "tiket": r["total_tiket"]
-        })
-
-    # cari jam paling populer
-    for mv in output.values():
-        sorted_jam = sorted(mv["list_jadwal"], key=lambda x: x["tiket"], reverse=True)
-        mv["jam_terpopuler"] = sorted_jam[0]["jam"]
-        mv["total_tiket"] = sorted_jam[0]["tiket"]
-
-    return {
-        "tanggal": tanggal.isoformat(),
-        "data": list(output.values())
-    }
-
-@router.get("/jamtayangpopuler/weekly")
-def jamtayang_weekly(db: Session = Depends(get_db)):
-
+    periode = periode.lower()
     year = 2024
     month = 12
 
-    minggu_ranges = [
-        (1, 7),
-        (8, 14),
-        (15, 21),
-        (22, 28),
-        (29, 31),
-    ]
-
-    hasil_minggu = []
-
-    for i, (start, end) in enumerate(minggu_ranges, start=1):
-
-        start_date = date(year, month, start)
-        end_date = date(year, month, end)
-
-        query = text("""
-            SELECT
-                m.id AS movie_id,
-                m.title,
-                j.jam,
-                COUNT(o.id) AS total_tiket
-            FROM orders o
-            JOIN jadwal j ON o.jadwal_id = j.id
-            JOIN movies m ON j.movie_id = m.id
-            WHERE o.transaction_date BETWEEN :start_date AND :end_date
-            GROUP BY m.id, m.title, j.jam
-        """)
-
-        rows = db.execute(query, {
-            "start_date": start_date,
-            "end_date": end_date
-        }).mappings().all()
-
-        per_film = {}
+    def extract(rows):
+        grp = {}
         for r in rows:
             mid = r["movie_id"]
-            if mid not in per_film:
-                per_film[mid] = {
-                    "title": r["title"],
-                    "list_jam": []
-                }
-            per_film[mid]["list_jam"].append({
-                "jam": str(r["jam"]),
-                "tiket": r["total_tiket"]
-            })
-
-        # tentukan jam tayang terpopuler
-        data_film = []
-        for mv in per_film.values():
-            sorted_jam = sorted(mv["list_jam"], key=lambda x: x["tiket"], reverse=True)
-            data_film.append({
-                "title": mv["title"],
-                "jam_terpopuler": sorted_jam[0]["jam"],
-                "total_tiket": sorted_jam[0]["tiket"],
-                "detail": mv["list_jam"]
-            })
-
-        hasil_minggu.append({
-            "minggu_ke": i,
-            "range": f"{start_date.isoformat()} s/d {end_date.isoformat()}",
-            "data": data_film
-        })
-
-    return {
-        "bulan": "Desember 2024",
-        "minggu": hasil_minggu
-    }
-
-@router.get("/jamtayangpopuler/monthly")
-def jamtayang_monthly(bulan: str, db: Session = Depends(get_db)):
-
-    bulan_lower = bulan.lower()
-
-    if bulan_lower not in MONTH_NAMES:
-        return {"error": "Nama bulan tidak valid!"}
-
-    month_number = MONTH_NAMES[bulan_lower]
-    year = 2024    
-
-    # tanggal awal bulan
-    start_date = date(year, month_number, 1)
-
-    # tanggal akhir bulan (exclusive)
-    if month_number == 12:
-        end_date = date(year + 1, 1, 1)
-    else:
-        end_date = date(year, month_number + 1, 1)
-
-    # QUERY ambil data per jam tayang
-    query = text("""
-        SELECT
-            m.id AS movie_id,
-            m.title,
-            j.jam,
-            COUNT(o.id) AS total_tiket
-        FROM orders o
-        JOIN jadwal j ON o.jadwal_id = j.id
-        JOIN movies m ON j.movie_id = m.id
-        WHERE o.transaction_date >= :start_date
-        AND o.transaction_date < :end_date
-        GROUP BY m.id, m.title, j.jam
-        ORDER BY m.id, total_tiket DESC;
-    """)
-
-    rows = db.execute(query, {
-        "start_date": start_date,
-        "end_date": end_date
-    }).mappings().all()
-
-    # kelompokkan data per film
-    output = {}
-
-    for r in rows:
-        mid = r["movie_id"]
-        if mid not in output:
-            output[mid] = {
+            grp.setdefault(mid,{
                 "movie_id": mid,
                 "title": r["title"],
-                "list_jadwal": []
-            }
+                "jadwal": []
+            })
+            grp[mid]["jadwal"].append({"jam": str(r["jam"]), "tiket_terjual": r["total"]})
 
-        output[mid]["list_jadwal"].append({
-            "jam": str(r["jam"]),
-            "tiket": r["total_tiket"]
-        })
+        for g in grp.values():
+            g["jadwal"].sort(key=lambda x: x["tiket_terjual"], reverse=True)
+            g["jam_terpopuler"] = g["jadwal"][0]["jam"]
+        return list(grp.values())
 
-    # tentukan jam terpopuler per film
-    for mv in output.values():
-        sorted_jam = sorted(mv["list_jadwal"], key=lambda x: x["tiket"], reverse=True)
-        mv["jam_terpopuler"] = sorted_jam[0]["jam"]
-        mv["total_tiket_jam_terpopuler"] = sorted_jam[0]["tiket"]
+    if periode == "harian":
+        if not hari: return {"error": "hari wajib untuk harian"}
+
+        tanggal = date(year, month, hari)
+        query = text("""
+            SELECT m.id movie_id, m.title, j.jam, COUNT(o.id) total
+            FROM orders o
+            JOIN jadwal j ON o.jadwal_id=j.id
+            JOIN movies m ON j.movie_id=m.id
+            WHERE o.transaction_date=:t
+            GROUP BY m.id,m.title,j.jam;
+        """)
+
+        rows = db.execute(query, {"t": tanggal}).mappings().all()
+        return {"periode":"harian","tanggal":tanggal.isoformat(),"data":extract(rows)}
+
+    if periode == "mingguan":
+        minggu_ranges=[(1,7),(8,14),(15,21),(22,28),(29,31)]
+        hasil=[]
+        for i,(s,e) in enumerate(minggu_ranges,1):
+            start,end=date(year,month,s),date(year,month,e)
+            query=text("""
+                SELECT m.id movie_id,m.title,j.jam,COUNT(o.id) total
+                FROM orders o
+                JOIN jadwal j ON o.jadwal_id=j.id
+                JOIN movies m ON j.movie_id=m.id
+                WHERE o.transaction_date BETWEEN :s AND :e
+                GROUP BY m.id,m.title,j.jam;
+            """)
+            rows=db.execute(query,{"s":start,"e":end}).mappings().all()
+            hasil.append({"minggu_ke":i,"periode":f"{start}s/d{end}","data":extract(rows)})
+        return {"periode":"mingguan","data":hasil}
+
+    if periode == "bulanan":
+        if not bulan: return {"error":"bulan wajib untuk bulanan"}
+
+        bl=bulan.lower()
+        if bl not in MONTH_NAMES: return {"error":"bulan tidak valid"}
+
+        mn=MONTH_NAMES[bl]
+        start=date(year,mn,1)
+        end=date(year+1,1,1) if mn==12 else date(year,mn+1,1)
+
+        query=text("""
+            SELECT m.id movie_id,m.title,j.jam,COUNT(o.id) total
+            FROM orders o
+            JOIN jadwal j ON o.jadwal_id=j.id
+            JOIN movies m ON j.movie_id=m.id
+            WHERE o.transaction_date>=:s AND o.transaction_date<:e
+            GROUP BY m.id,m.title,j.jam;
+        """)
+
+        rows=db.execute(query,{"s":start,"e":end}).mappings().all()
+        return {"periode":"bulanan","bulan":bulan,"data":extract(rows)}
+
+    return {"error": "periode salah"}
+
+
+# 3. Efektivitas Promo
+def hasil_kesimpulan(t_change, p_change, h_change):
+    """Menerjemahkan persentase perubahan menjadi kalimat kesimpulan."""
+    if t_change is None:
+        return "Data transaksi tanpa promo tidak tersedia untuk analisis."
+
+    kesimpulan = []
+    
+    if t_change is not None:
+        if t_change > 0:
+            kesimpulan.append(f"Promo meningkatkan jumlah transaksi sebesar {t_change}%")
+        else:
+            kesimpulan.append(f"Promo tidak efektif, transaksi turun {abs(t_change)}%")
+
+    if p_change is not None:
+        if p_change > 0:
+            kesimpulan.append(f"Promo meningkatkan pendapatan sebesar {p_change}%")
+        else:
+            kesimpulan.append(f"Promo menurunkan pendapatan sebesar {abs(p_change)}%")
+
+    if h_change is not None:
+        if h_change < 0:
+            kesimpulan.append(f"Harga rata-rata turun {abs(h_change)}% saat promo (indikasi diskon efektif).")
+        else:
+            kesimpulan.append(f"Harga rata-rata naik {h_change}% meski ada promo (perlu evaluasi).")
+
+    return " | ".join(kesimpulan)
+
+
+@router.get("/analisis/promo-efektivitas")
+def analisis_efektivitas_promo(db: Session = Depends(get_db)):
+    
+    query = text("""
+        SELECT 
+            id,
+            promo_name,
+            final_price
+        FROM orders;
+    """)
+
+    try:
+        rows = db.execute(query).mappings().all()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gagal mengambil data orders mentah dari database: {e}")
+
+
+    tanpa = {"total_transaksi": 0, "total_pendapatan": 0.0, "harga_list": []}
+    dengan = {"total_transaksi": 0, "total_pendapatan": 0.0, "harga_list": []}
+
+    for r in rows:
+        try:
+
+            price = float(r["final_price"]) if r["final_price"] is not None else 0.0
+            promo_name = r["promo_name"]
+            
+            is_promo = (promo_name is not None and promo_name != 'NO PROMO')
+    
+            target = dengan if is_promo else tanpa
+            
+            target["total_transaksi"] += 1
+            target["total_pendapatan"] += price
+            target["harga_list"].append(price)
+
+        except Exception:
+            continue
+            
+    t_tanpa = tanpa["total_transaksi"]
+    t_dengan = dengan["total_transaksi"]
+    
+
+    tanpa['avg_harga'] = sum(tanpa['harga_list']) / t_tanpa if t_tanpa > 0 else 0.0
+    dengan['avg_harga'] = sum(dengan['harga_list']) / t_dengan if t_dengan > 0 else 0.0
+    
+    tanpa_final = {k: v for k, v in tanpa.items() if k != 'harga_list'}
+    dengan_final = {k: v for k, v in dengan.items() if k != 'harga_list'}
+    
+    t_change, p_change, h_change = None, None, None
+
+    if t_tanpa > 0:
+        t_change = round(((t_dengan - t_tanpa) / t_tanpa) * 100, 2)
+        
+        p_tanpa = tanpa_final["total_pendapatan"]
+        if p_tanpa > 0:
+            p_change = round(((dengan_final["total_pendapatan"] - p_tanpa) / p_tanpa) * 100, 2)
+            
+        h_tanpa = tanpa_final["avg_harga"]
+        if h_tanpa > 0:
+            h_change = round(((dengan_final["avg_harga"] - h_tanpa) / h_tanpa) * 100, 2)
+    
 
     return {
-        "bulan": bulan,
-        "periode": {
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat()
+        "ringkasan": {
+            "transaksi_promo_vs_tanpa": t_change,
+            "pendapatan_promo_vs_tanpa": p_change,
+            "perbedaan_rata_rata_harga": h_change
         },
-        "total_film": len(output),
-        "data": list(output.values())
+        "analisis": {
+            "tanpa_promo": tanpa_final,
+            "dengan_promo": dengan_final,
+        },
+        "kesimpulan": hasil_kesimpulan(t_change, p_change, h_change)
+    }
+
+# 4. Kursi paling populer
+
+def get_top5_kursi_query_mysql():
+    # versi MySQL / MariaDB (CONCAT tersedia)
+    return text(
+        """
+        SELECT
+            CONCAT(os.row, os.col) AS kursi_kode,
+            COUNT(os.id) AS jumlah_pemesanan
+        FROM order_seats os
+        JOIN orders o ON os.order_id = o.id
+        WHERE DATE(o.transaction_date) >= :start_date
+          AND DATE(o.transaction_date) <= :end_date
+        GROUP BY os.row, os.col
+        ORDER BY jumlah_pemesanan DESC
+        LIMIT 5
+        """
+    )
+
+# Jika DB Anda SQLite, gunakan versi ini (SQLite memakai || untuk concat):
+def get_top5_kursi_query_sqlite():
+    return text(
+        """
+        SELECT
+            (os.row || os.col) AS kursi_kode,
+            COUNT(os.id) AS jumlah_pemesanan
+        FROM order_seats os
+        JOIN orders o ON os.order_id = o.id
+        WHERE DATE(o.transaction_date) >= :start_date
+          AND DATE(o.transaction_date) <= :end_date
+        GROUP BY os.row, os.col
+        ORDER BY jumlah_pemesanan DESC
+        LIMIT 5
+        """
+    )
+
+@router.get("/analisis/kursipopuler/{mode}")
+def kursi_paling_populer(
+    mode: str,
+    tanggal: Optional[str] = Query(None, description="Format YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+):
+    """
+    Pilih mode: harian, mingguan, bulanan.
+    """
+    mode_map = {"harian": 0, "mingguan": 1, "bulanan": 2}
+    if mode not in mode_map:
+        raise HTTPException(status_code=400, detail="Mode harus harian, mingguan, atau bulanan.")
+
+    # parse tanggal atau pakai hari ini
+    if tanggal:
+        try:
+            tgl = datetime.strptime(tanggal, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
+    else:
+        tgl = date.today()
+
+    # tentukan rentang
+    if mode == "harian":
+        start = tgl
+        end = tgl
+    elif mode == "mingguan":
+        start = tgl - timedelta(days=tgl.weekday())
+        end = start + timedelta(days=6)
+    else:  # bulanan
+        start = tgl.replace(day=1)
+        if start.month == 12:
+            end = date(start.year, 12, 31)
+        else:
+            end = date(start.year, start.month + 1, 1) - timedelta(days=1)
+
+    # bind sebagai string YYYY-MM-DD (paling kompatibel)
+    start_str = start.isoformat()
+    end_str = end.isoformat()
+
+    # Pilih query sesuai DB (ubah ke sqlite jika DB Anda SQLite)
+    # query = get_top5_kursi_query_sqlite()
+    query = get_top5_kursi_query_mysql()
+
+    result = db.execute(query, {"start_date": start_str, "end_date": end_str}).mappings().all()
+
+    # normalisasi hasil
+    top5 = [
+        {"kursi_kode": row["kursi_kode"], "jumlah_pemesanan": int(row["jumlah_pemesanan"])}
+        for row in result
+    ]
+
+    return {
+        "mode": mode,
+        "tanggal_awal": start_str,
+        "tanggal_akhir": end_str,
+        "top_5_kursi": top5,
+        "count": len(top5)
     }
 
 
-# 3. Pilihan kursi paling populer
+# 5. Pendapatan Film Terbanyak (Juara per Periode)
+@router.get("/analisis/top-revenue-films")
+def get_top_revenue_films(
+    period: Optional[str] = Query(None, description="Pilih periode: 'hari', 'minggu', 'bulan'"),
+    db: Session = Depends(get_db)
+):
+    """
+    Menampilkan FILM JUARA (Pendapatan Tertinggi) untuk setiap rentang waktu di DESEMBER 2024.
+    """
+    
+    if not period:
+        return {
+            "status": "info",
+            "pesan": "Tolong pilih periode dulu!",
+            "instruksi": {
+                "key": "period",
+                "opsi": ["hari", "minggu", "bulan"],
+                "contoh": "/analisis/top-revenue-films?period=minggu"
+            }
+        }
 
-# 4. Pendapatan per film
+    ranges = []
+    
+    if period == "hari":
+        for d in range(1, 32):
+            ranges.append((d, d, f"Tanggal {d} Desember 2024"))
+            
+    elif period == "minggu":
+        ranges = [
+            (1, 7, "Minggu 1 (1-7 Desember 2024)"),
+            (8, 14, "Minggu 2 (8-14 Desember 2024)"),
+            (15, 21, "Minggu 3 (15-21 Desember 2024)"),
+            (22, 28, "Minggu 4 (22-28 Desember 2024)"),
+            (29, 31, "Minggu 5 (29-31 Desember 2024)")
+        ]
+        
+    elif period == "bulan":
+        ranges = [(1, 31, "Bulan Desember 2024 penuh")]
+        
+    else:
+        return {"pesan": "Periode salah. Pilih: hari, minggu, atau bulan."}
 
-# 5. Perilaku pelanggann (member paling sering beli)
+    output_data = []
+    
+    for start_day, end_day, label in ranges:
+        start_date = date(2024, 12, start_day)
+        end_date = date(2024, 12, end_day)
+        
+        top_film = (
+            db.query(
+                Movie.title,
+                func.sum(Order.final_price).label("total_revenue")
+            )
+            .join(Jadwal, Movie.id == Jadwal.movie_id)
+            .join(Order, Jadwal.id == Order.jadwal_id)
+            .filter(Order.transaction_date >= start_date)
+            .filter(Order.transaction_date <= end_date)
+            .group_by(Movie.id)
+            .order_by(desc("total_revenue"))
+            .first()
+        )
+        
+        if top_film:
+            output_data.append({
+                "periode": label,
+                "film_juara": top_film.title,
+                "pendapatan": top_film.total_revenue
+            })
+        else:
+            output_data.append({
+                "periode": label,
+                "film_juara": "Tidak ada transaksi",
+                "pendapatan": 0
+            })
+
+    return {
+        "request_period": period,
+        "total_data": len(output_data),
+        "hasil_analisis": output_data
+    }
+
+
+
+# 6. Perilaku Pelanggan (Top Customers)
+@router.get("/analisis/top-customers")
+def get_top_customers(
+    period: Optional[str] = Query(None, description="Pilih periode: 'minggu', 'bulan'"),
+    db: Session = Depends(get_db)
+):
+    """
+    Menampilkan 'PELANGGAN TER-RAJIN' (Frekuensi Order Terbanyak) per periode di DESEMBER 2024.
+    """
+    
+    if not period:
+        return {
+            "status": "info",
+            "pesan": "Tolong pilih periode dulu!",
+            "instruksi": {"key": "period", "opsi": ["minggu", "bulan"]}
+        }
+
+    ranges = []
+    
+    if period == "minggu":
+
+        ranges = [
+            (1, 7, "Minggu 1 (1-7 Des)"),
+            (8, 14, "Minggu 2 (8-14 Des)"),
+            (15, 21, "Minggu 3 (15-21 Des)"),
+            (22, 28, "Minggu 4 (22-28 Des)"),
+            (29, 31, "Minggu 5 (29-31 Des)")
+        ]
+    elif period == "bulan":
+        ranges = [(1, 31, "Bulan Desember Full")]
+    else:
+        return {"pesan": "Periode salah. Pilih: minggu atau bulan."}
+
+    output_data = []
+    
+    for start_day, end_day, label in ranges:
+        start_date = date(2024, 12, start_day)
+        end_date = date(2024, 12, end_day)
+
+
+        top_member = (
+            db.query(
+                Membership.code.label("member_code"),
+                Membership.nama,
+                func.count(Order.id).label("total_transaksi")
+            )
+            .join(Order, Membership.code == Order.membership_code)
+            .filter(Order.transaction_date >= start_date)
+            .filter(Order.transaction_date <= end_date)
+            .group_by(Membership.code, Membership.nama) 
+            .order_by(desc("total_transaksi"))
+            .first() 
+        )
+
+        if top_member:
+            output_data.append({
+                "periode": label,
+                "pelanggan_juara": top_member.nama,
+                "code_pelanggan": top_member.member_code,
+                "jumlah_transaksi": top_member.total_transaksi
+            })
+        else:
+            output_data.append({
+                "periode": label,
+                "pelanggan_juara": "Tidak ada transaksi",
+                "code_pelanggan": None,
+                "jumlah_transaksi": 0
+            })
+
+    return {
+        "request_period": period,
+        "info": "Menampilkan pelanggan dengan order terbanyak pada periode tersebut.",
+        "total_data": len(output_data),
+        "hasil_analisis": output_data
+    }
+
+
+# 7. Hari dan tanggal teramai
+import calendar 
+@router.get("/analisis/most-busiest-day")
+def get_busiest_day(
+    bulan: int = Query(12, description="Bulan (1-12)"),
+    tahun: int = Query(2024, description="Tahun"),
+    db: Session = Depends(get_db)
+):
+    
+    if bulan != 12 or tahun != 2024:
+        return {
+            "message": f"Tidak ada data transaksi di periode yang diminta. Untuk saat ini, hanya ada data bulan Desember 2024."
+        }
+
+    top_dates = (
+        db.query(
+            Order.transaction_date,
+            func.sum(Order.seat_count).label("total_tiket")
+        )
+        .filter(extract('month', Order.transaction_date) == bulan)
+        .filter(extract('year', Order.transaction_date) == tahun)
+        .group_by(Order.transaction_date)
+        .order_by(desc("total_tiket"))
+        .limit(5)
+        .all()
+    )
+
+
+    top_days = (
+        db.query(
+            func.dayname(Order.transaction_date).label("nama_hari"),
+            func.sum(Order.seat_count).label("total_tiket")
+        )
+        .filter(extract('month', Order.transaction_date) == bulan)
+        .filter(extract('year', Order.transaction_date) == tahun)
+        .group_by("nama_hari")
+        .order_by(desc("total_tiket")) 
+        .all()
+    )
+
+    nama_bulan = calendar.month_name[bulan]
+    juara_tanggal = top_dates[0] 
+    juara_hari = top_days[0]     
+
+    detail_top_dates = []
+    for r in top_dates:
+        detail_top_dates.append({
+            "tanggal": r.transaction_date.strftime("%d %B %Y"),
+            "hari": r.transaction_date.strftime("%A"),
+            "total_tiket": r.total_tiket
+        })
+
+    detail_days_ranking = []
+    for r in top_days:
+        detail_days_ranking.append({
+            "nama_hari": r.nama_hari,
+            "total_akumulasi_tiket": r.total_tiket
+        })
+
+    return {
+        "periode": f"{nama_bulan} {tahun}",
+        "kesimpulan": {
+            "judul": "Most Busiest Time Analysis",
+            "tanggal_tersibuk": f"{juara_tanggal.transaction_date.strftime('%A, %d %B %Y')} (Total: {juara_tanggal.total_tiket} tiket)",
+            "hari_favorit_penonton": f"Secara umum, penonton paling suka datang di hari {juara_hari.nama_hari} (Total sebulan: {juara_hari.total_tiket} tiket)"
+        },
+        "top_5_tanggal_teramai": detail_top_dates,
+        "ranking_hari_teramai": detail_days_ranking
+    }
+
+
+
+# 8. Genre paling populer 
+@router.get("/analisis/genrepopuler")
+def genre_populer(
+    periode: str,
+    hari: int = None,
+    bulan: str = None,
+    db: Session = Depends(get_db)
+):
+
+    """Genre yang paling populer ditunjukkan dari total penjualan tiket terbanyak.
+    Pilih periode: harian, mingguan, bulanan.
+    """
+
+
+    periode = periode.lower()
+    year = 2024
+    month = 12
+
+    def persen(rows):
+        total = sum(r["total"] for r in rows)
+        for r in rows:
+            r["persentase"] = round((r["total"] / total * 100),1) if total>0 else 0
+        return rows
+
+    if periode == "harian":
+        if not hari: return {"error":"hari wajib"}
+        tanggal=date(year,month,hari)
+
+        q=text("""
+            SELECT m.genre,COUNT(os.id) total
+            FROM order_seats os
+            JOIN orders o ON os.order_id=o.id
+            JOIN jadwal j ON o.jadwal_id=j.id
+            JOIN movies m ON j.movie_id=m.id
+            WHERE o.transaction_date=:t
+            GROUP BY m.genre
+            ORDER BY total DESC;
+        """)
+        rows=db.execute(q,{"t":tanggal}).mappings().all()
+        return {"periode":"harian","tanggal":tanggal.isoformat(),"data":persen(rows)}
+
+    if periode == "mingguan":
+        minggu_ranges=[(1,7),(8,14),(15,21),(22,28),(29,31)]
+        hasil=[]
+        for i,(s,e) in enumerate(minggu_ranges,1):
+            start,end=date(year,month,s),date(year,month,e)
+            q=text("""
+                SELECT m.genre,COUNT(os.id) total
+                FROM order_seats os
+                JOIN orders o ON os.order_id=o.id
+                JOIN jadwal j ON o.jadwal_id=j.id
+                JOIN movies m ON j.movie_id=m.id
+                WHERE o.transaction_date BETWEEN :s AND :e
+                GROUP BY m.genre
+                ORDER BY total DESC;
+            """)
+            rows=db.execute(q,{"s":start,"e":end}).mappings().all()
+            hasil.append({
+                "minggu_ke":i,
+                "periode":f"{start}s/d{end}",
+                "data":persen(rows)
+            })
+        return {"periode":"mingguan","data":hasil}
+
+    if periode == "bulanan":
+        if not bulan: return {"error":"bulan wajib"}
+        bl=bulan.lower()
+        if bl not in MONTH_NAMES: return {"error":"bulan invalid"}
+        mn=MONTH_NAMES[bl]
+        start=date(year,mn,1)
+        end=date(year+1,1,1) if mn==12 else date(year,mn+1,1)
+
+        q=text("""
+            SELECT m.genre,COUNT(os.id) total
+            FROM order_seats os
+            JOIN orders o ON os.order_id=o.id
+            JOIN jadwal j ON o.jadwal_id=j.id
+            JOIN movies m ON j.movie_id=m.id
+            WHERE o.transaction_date>=:s AND o.transaction_date<:e
+            GROUP BY m.genre
+            ORDER BY total DESC;
+        """)
+
+        rows=db.execute(q,{"s":start,"e":end}).mappings().all()
+        return {"periode":"bulanan","bulan":bulan,"data":persen(rows)}
+
+    return {"error":"periode salah"}
+
+
+# 9. metode pembayaran paling populer(Payment Preference)
+@router.get("/analisis/metodepembayaran")
+def metode_pembayaran(db: Session = Depends(get_db)):
+    """Metode pembayaran yang paling populer ditunjukkan dari total jenis pembayaran terbanyak di Order.
+    """
+
+    query = text("""
+        SELECT 
+            payment_method,
+            COUNT(id) AS penggunaan,
+            ROUND(COUNT(id) * 100.0 / (SELECT COUNT(*) FROM orders), 1) AS persentase
+        FROM orders
+        GROUP BY payment_method
+        ORDER BY penggunaan DESC;
+    """)
+    
+    result = db.execute(query).mappings().all()
+    return {"data": result}

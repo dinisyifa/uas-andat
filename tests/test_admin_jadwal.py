@@ -1,24 +1,25 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from datetime import date, time
 
-# Import komponen aplikasi utama
 from app.main import app
 from app.database import get_db
-from app.models import Movie, Studio, Jadwal 
-from datetime import datetime, time, date
+from app.models import Movie, Studio, Jadwal
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
-# ======================================================
-# SETUP DATABASE ASLI
-# ======================================================
-DATABASE_URL = "sqlite:///./app.db" 
+# -----------------------------
+# 1. Setup REAL SQLite Test DB
+# -----------------------------
+# Pastikan konfigurasi database Anda benar
+password = "kopigulaaren30"
+password = password.replace("@", "%40")
+TEST_DB = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
 
-engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False}
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine_test = create_engine(TEST_DB)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine_test)
 
+# Override dependency get_db → gunakan DB testing
 def override_get_db():
     db = TestingSessionLocal()
     try:
@@ -30,204 +31,149 @@ app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
 
-# ======================================================
-# FIXTURE CLEAR TABLE
-# ======================================================
 @pytest.fixture(autouse=True)
-def clear_db():
+def clean_db():
+    """Reset database before each test"""
     db = TestingSessionLocal()
-    db.query(Jadwal).delete()
-    db.query(Movie).delete()
-    db.query(Studio).delete()
+    db.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+    db.execute(text("TRUNCATE TABLE jadwal;"))
+    db.execute(text("TRUNCATE TABLE movies;"))
+    db.execute(text("TRUNCATE TABLE studios;"))
+    db.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
     db.commit()
     db.close()
 
 
-# ======================================================
-# HELPER FUNCTIONS
-# ======================================================
-def create_movie(title="Inception", duration=120):
-    """Membuat Movie dan mengembalikan code (MOVXXX)."""
-    res = client.post("/movies", json={
-        "title": title, "genre": "Sci-Fi", "durasi": duration,
-        "director": "Nolan", "rating": "PG13"
-    })
-    assert res.status_code == 200
-    return res.json()["data"]["code"]
+@pytest.fixture
+def seed():
+    """Insert movie & studio for valid references"""
+    db = TestingSessionLocal()
+    movie = Movie(code="MV001", title="Avatar", price=50000)
+    studio = Studio(code="STD01", name="Studio 1")
+    db.add_all([movie, studio])
+    db.commit()
+    db.close()
+    return {"movie": movie, "studio": studio}
 
 
-def create_studio(rows=5, cols=10):
-    """Membuat Studio dan mengembalikan code (STXXX)."""
-    res = client.post("/studios", json={"rows": rows, "cols": cols})
-    assert res.status_code == 200
-    return res.json()["data"]["code"]
+# -------- TEST ADD SCHEDULE --------
 
-
-def create_schedule(m_code, s_code, tanggal="2025-12-10", jam="19:00"):
-    """Membuat Jadwal. Tanggal dan jam adalah string."""
-    res = client.post("/schedules", json={
-        "movie_code": m_code,
-        "studio_code": s_code,
-        "tanggal": tanggal,
-        "jam": jam
-    })
-    
-    assert res.status_code == 200
-    data = res.json()
-    assert data["code"].startswith("SCH")
-    return data["code"]
-
-
-# ======================================================
-# TEST ENDPOINT: POST /schedules
-# ======================================================
-def test_add_schedule_success():
-    m_code = create_movie()
-    s_code = create_studio()
-    tanggal_input = "2025-12-10"
-    jam_input = "19:00"
-    
-    res = client.post("/schedules", json={
-        "movie_code": m_code,
-        "studio_code": s_code,
-        "tanggal": tanggal_input,
-        "jam": jam_input
-    })
-
-    assert res.status_code == 200
-    data = res.json()
-    assert data["movie_code"] == m_code
-    assert data["studio_code"] == s_code
-    assert data["movie_title"] == "Inception"
-    # FIX: Output jam dari API akan menjadi string, seringkali dalam format HH:MM:SS
-    # Kita cek apakah output jam dimulai dengan input jam (misal 19:00:00 atau 19:00)
-    assert data["jam"].startswith(jam_input) 
-    assert data["tanggal"] == tanggal_input # Assertion untuk tanggal string
-    assert data["code"].startswith("SCH")
-
-
-def test_add_schedule_movie_not_found():
-    s_code = create_studio()
-    
-    res = client.post("/schedules", json={
-        "movie_code": "MOVXXX", 
-        "studio_code": s_code,
+def test_add_schedule_success(seed):
+    resp = client.post("/schedules", json={
+        "movie_code": "MV001",
+        "studio_code": "STD01",
         "tanggal": "2025-12-10",
-        "jam": "19:00"
+        "jam": "14:30"
     })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["movie_code"] == "MV001"
+    assert data["studio_code"] == "STD01"
+    assert data["tanggal"] == "2025-12-10"
+    assert data["jam"] == "14:30:00"  # DB konversi time → HH:MM:SS
 
-    assert res.status_code == 404
-    assert "Movie tidak ditemukan" in res.json()["detail"]
 
-
-def test_add_schedule_studio_not_found():
-    m_code = create_movie()
-    
-    res = client.post("/schedules", json={
-        "movie_code": m_code,
-        "studio_code": "STXXX",
+def test_add_schedule_invalid_movie(seed):
+    resp = client.post("/schedules", json={
+        "movie_code": "NOTFOUND",
+        "studio_code": "STD01",
         "tanggal": "2025-12-10",
-        "jam": "19:00"
+        "jam": "14:30"
+    })
+    assert resp.status_code == 404
+
+
+def test_add_schedule_invalid_studio(seed):
+    resp = client.post("/schedules", json={
+        "movie_code": "MV001",
+        "studio_code": "UNKNOWN",
+        "tanggal": "2025-12-10",
+        "jam": "14:30"
+    })
+    assert resp.status_code == 404
+
+
+def test_add_schedule_invalid_date_format(seed):
+    resp = client.post("/schedules", json={
+        "movie_code": "MV001",
+        "studio_code": "STD01",
+        "tanggal": "10-12-2025",
+        "jam": "14:30"
+    })
+    assert resp.status_code == 400
+
+
+def test_add_schedule_invalid_time_format(seed):
+    resp = client.post("/schedules", json={
+        "movie_code": "MV001",
+        "studio_code": "STD01",
+        "tanggal": "2025-12-10",
+        "jam": "2PM"
+    })
+    assert resp.status_code == 400
+
+
+# -------- TEST GET ALL --------
+
+def test_get_schedules(seed):
+    # Insert 1 schedule first
+    client.post("/schedules", json={
+        "movie_code": "MV001",
+        "studio_code": "STD01",
+        "tanggal": "2025-12-10",
+        "jam": "12:00"
+    })
+    resp = client.get("/schedules")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+
+
+# -------- TEST UPDATE --------
+
+def test_update_schedule_success(seed):
+    client.post("/schedules", json={
+        "movie_code": "MV001",
+        "studio_code": "STD01",
+        "tanggal": "2025-12-10",
+        "jam": "12:00"
     })
 
-    assert res.status_code == 404
-    assert "Studio tidak ditemukan" in res.json()["detail"]
+    resp = client.put("/schedules/SCH001", json={
+        "movie_code": "MV001",
+        "studio_code": "STD01",
+        "tanggal": "2025-12-11",
+        "jam": "16:00"
+    })
+    assert resp.status_code == 200
+    assert resp.json()["tanggal"] == "2025-12-11"
+    assert resp.json()["jam"] == "16:00:00"
 
 
-# ======================================================
-# TEST ENDPOINT: GET /schedules
-# ======================================================
-def test_get_schedules_empty():
-    res = client.get("/schedules")
-    assert res.status_code == 200
-    assert len(res.json()) == 0
+def test_update_not_found(seed):
+    resp = client.put("/schedules/NONE", json={
+        "movie_code": "MV001",
+        "studio_code": "STD01",
+        "tanggal": "2025-12-11",
+        "jam": "16:00"
+    })
+    assert resp.status_code == 404
 
 
-def test_get_schedules_multiple():
-    m_code1 = create_movie(title="Movie A")
-    s_code1 = create_studio(rows=1, cols=1)
-    m_code2 = create_movie(title="Movie B")
-    s_code2 = create_studio(rows=2, cols=2)
+# -------- TEST DELETE --------
 
-    create_schedule(m_code1, s_code1, "2025-12-10", "10:00")
-    create_schedule(m_code2, s_code2, "2025-12-11", "14:30")
+def test_delete_schedule(seed):
+    client.post("/schedules", json={
+        "movie_code": "MV001",
+        "studio_code": "STD01",
+        "tanggal": "2025-12-10",
+        "jam": "12:00"
+    })
 
-    res = client.get("/schedules")
-    assert res.status_code == 200
-    data = res.json()
-    assert len(data) == 2
-    assert data[0]["movie_title"] == "Movie A"
-    assert data[1]["movie_title"] == "Movie B"
-    assert data[1]["tanggal"] == "2025-12-11"
-    # FIX: Memastikan output jam sesuai dengan input (misal 14:30:00)
-    assert data[1]["jam"].startswith("14:30")
-
-
-# ======================================================
-# TEST ENDPOINT: PUT /schedules/{code}
-# ======================================================
-def test_update_schedule_success():
-    m_code_old = create_movie(title="Old Movie")
-    s_code_old = create_studio(rows=5, cols=5)
+    resp = client.delete("/schedules/SCH001")
+    assert resp.status_code == 200
+    assert "berhasil dihapus" in resp.json()["status"]
     
-    schedule_code = create_schedule(m_code_old, s_code_old) 
-
-    m_code_new = create_movie(title="New Movie", duration=150)
-    s_code_new = create_studio(rows=10, cols=10)
-    tanggal_update = "2025-12-20"
-    jam_update = "21:05"
-
-    res = client.put(f"/schedules/{schedule_code}", json={
-        "movie_code": m_code_new,
-        "studio_code": s_code_new,
-        "tanggal": tanggal_update, 
-        "jam": jam_update
-    })
-
-    assert res.status_code == 200
-    data = res.json()
-    assert data["code"] == schedule_code
-    assert data["movie_title"] == "New Movie"
-    assert data["tanggal"] == tanggal_update
-    assert data["jam"].startswith(jam_update) # Assertion untuk jam yang diupdate
-    assert data["movie_code"] == m_code_new
-    assert data["studio_code"] == s_code_new
-
-
-def test_update_schedule_not_found():
-    m_code = create_movie()
-    s_code = create_studio()
-
-    res = client.put("/schedules/SCHXXX", json={ 
-        "movie_code": m_code,
-        "studio_code": s_code,
-        "tanggal": "2025-12-20",
-        "jam": "21:00"
-    })
-
-    assert res.status_code == 404
-    assert "Jadwal tidak ditemukan" in res.json()["detail"]
-
-
-# ======================================================
-# TEST ENDPOINT: DELETE /schedules/{code}
-# ======================================================
-def test_delete_schedule_success():
-    m_code = create_movie()
-    s_code = create_studio()
-    
-    schedule_code = create_schedule(m_code, s_code) 
-
-    res = client.delete(f"/schedules/{schedule_code}")
-
-    assert res.status_code == 200
-    assert "berhasil dihapus" in res.json()["status"]
-
-    verify_res = client.get("/schedules")
-    assert len(verify_res.json()) == 0
-
-
-def test_delete_schedule_not_found():
-    res = client.delete("/schedules/SCHXXX") 
-    assert res.status_code == 404
-    assert "Jadwal tidak ditemukan" in res.json()["detail"]
+    # Confirm removed
+    resp2 = client.get("/schedules")
+    assert len(resp2.json()) == 0

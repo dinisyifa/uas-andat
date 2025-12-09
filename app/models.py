@@ -48,7 +48,7 @@ class Studio(Base):
     __tablename__ = "studios"
     id = Column(Integer, primary_key=True)
     code = Column(String(20), unique=True)
-    nama = Column(String(100))
+    name = Column(String(100))
     rows = Column(Integer)
     cols = Column(Integer)
 

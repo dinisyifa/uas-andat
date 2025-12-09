@@ -149,12 +149,12 @@ def get_studios(db: Session = Depends(get_db)):
 @router.post("/studios")
 def add_studio(item: StudioInput, db: Session = Depends(get_db)):
 
-    next_id, code, name = generate_studio_code(db)
+    next_id, code, nama = generate_studio_code(db)
 
     studio = Studio(
         id=next_id,       
         code=code,
-        name=name,
+        name=nama,
         rows=item.rows,
         cols=item.cols
     )
