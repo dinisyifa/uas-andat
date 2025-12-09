@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, extract
 from datetime import date, datetime, timedelta
 from typing import Optional, List
-
+import calendar
 from app.database import get_db
 from sqlalchemy import text
 from app.models import Movie, Order, Membership, Jadwal
@@ -623,6 +623,22 @@ def get_busiest_day(
 
 
 # 8. Genre paling populer 
+def persen(rows):
+    """Menghitung persentase dari total penjualan untuk setiap genre."""
+
+    data = [dict(r) for r in rows] 
+    
+
+    total = sum(d["total"] for d in data)
+    
+
+    for d in data:
+
+        d["persentase"] = round((d["total"] / total * 100), 1) if total > 0 else 0
+        
+    return data 
+
+
 @router.get("/analisis/genrepopuler")
 def genre_populer(
     periode: str,
@@ -630,7 +646,6 @@ def genre_populer(
     bulan: str = None,
     db: Session = Depends(get_db)
 ):
-
     """Genre yang paling populer ditunjukkan dari total penjualan tiket terbanyak.
     Pilih periode: harian, mingguan, bulanan.
     """
@@ -640,15 +655,14 @@ def genre_populer(
     year = 2024
     month = 12
 
-    def persen(rows):
-        total = sum(r["total"] for r in rows)
-        for r in rows:
-            r["persentase"] = round((r["total"] / total * 100),1) if total>0 else 0
-        return rows
-
     if periode == "harian":
-        if not hari: return {"error":"hari wajib"}
-        tanggal=date(year,month,hari)
+        if not hari: return {"error":"Parameter 'hari' wajib diisi untuk periode harian."}
+        
+
+        try:
+            tanggal = date(year, month, hari)
+        except ValueError:
+            return {"error": f"Nilai hari {hari} tidak valid untuk bulan {month} tahun {year}."}
 
         q=text("""
             SELECT m.genre,COUNT(os.id) total
@@ -664,10 +678,16 @@ def genre_populer(
         return {"periode":"harian","tanggal":tanggal.isoformat(),"data":persen(rows)}
 
     if periode == "mingguan":
+
         minggu_ranges=[(1,7),(8,14),(15,21),(22,28),(29,31)]
         hasil=[]
         for i,(s,e) in enumerate(minggu_ranges,1):
-            start,end=date(year,month,s),date(year,month,e)
+            try:
+                start,end=date(year,month,s),date(year,month,e)
+            except ValueError:
+
+                continue 
+                
             q=text("""
                 SELECT m.genre,COUNT(os.id) total
                 FROM order_seats os
@@ -681,18 +701,24 @@ def genre_populer(
             rows=db.execute(q,{"s":start,"e":end}).mappings().all()
             hasil.append({
                 "minggu_ke":i,
-                "periode":f"{start}s/d{end}",
+                "periode":f"{start} s/d {end}",
                 "data":persen(rows)
             })
         return {"periode":"mingguan","data":hasil}
 
     if periode == "bulanan":
-        if not bulan: return {"error":"bulan wajib"}
-        bl=bulan.lower()
-        if bl not in MONTH_NAMES: return {"error":"bulan invalid"}
-        mn=MONTH_NAMES[bl]
-        start=date(year,mn,1)
-        end=date(year+1,1,1) if mn==12 else date(year,mn+1,1)
+        if not bulan: return {"error": "Parameter 'bulan' wajib diisi untuk periode bulanan."}
+        bl = bulan.lower()
+        
+        # Gunakan MONTH_NAMES yang sudah didefinisikan
+        if bl not in MONTH_NAMES: 
+             return {"error": f"Nama bulan '{bulan}' tidak valid. Gunakan nama bulan Indonesia (cth: Januari)."}
+             
+        mn = MONTH_NAMES[bl] 
+        start = date(year, mn, 1)
+        # Menghitung tanggal akhir bulan yang tepat (tanggal 1 bulan berikutnya)
+        # Ini menghindari masalah jumlah hari (28/29/30/31)
+        end = date(year + 1, 1, 1) if mn == 12 else date(year, mn + 1, 1)
 
         q=text("""
             SELECT m.genre,COUNT(os.id) total
@@ -700,7 +726,7 @@ def genre_populer(
             JOIN orders o ON os.order_id=o.id
             JOIN jadwal j ON o.jadwal_id=j.id
             JOIN movies m ON j.movie_id=m.id
-            WHERE o.transaction_date>=:s AND o.transaction_date<:e
+            WHERE o.transaction_date>=:s AND o.transaction_date<:e 
             GROUP BY m.genre
             ORDER BY total DESC;
         """)
@@ -708,7 +734,8 @@ def genre_populer(
         rows=db.execute(q,{"s":start,"e":end}).mappings().all()
         return {"periode":"bulanan","bulan":bulan,"data":persen(rows)}
 
-    return {"error":"periode salah"}
+    # Error jika periode yang dimasukkan bukan 'harian', 'mingguan', atau 'bulanan'
+    return {"error": f"Periode '{periode}' salah. Pilih: harian, mingguan, atau bulanan."}
 
 
 # 9. metode pembayaran paling populer(Payment Preference)
