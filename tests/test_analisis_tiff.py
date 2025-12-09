@@ -1,144 +1,239 @@
+import os
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock
-from datetime import date
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+import datetime
 
-# Import app utama (sesuaikan path ini dengan main.py kamu)
-# Jika main.py ada di folder app, gunakan "from app.main import app"
-# Jika main.py ada di root, gunakan "from main import app"
-from app.main import app 
+# --- IMPORT DARI APLIKASI ---
+from app.main import app
+from app.database import Base, get_db
+from app.models import Movie, Jadwal, Order, OrderSeat, Studio, Membership
 
-# Import dependency get_db agar bisa kita override
-from app.database import get_db
+# ==============================================================================
+# 1. SETUP REAL DATABASE (MYSQL)
+# ==============================================================================
+# Password sesuai file Nastar Keju kamu
+TEST_DB = "mysql+pymysql://root:616084RL@localhost:3306/bioskop"
 
-# Membuat Client Test
+engine_test = create_engine(TEST_DB)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine_test)
+
+# Reset Database (Drop & Create)
+Base.metadata.drop_all(bind=engine_test)
+Base.metadata.create_all(bind=engine_test)
+
+# Override Dependency
+def override_get_db():
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
-# --- FIXTURE: Mock Database ---
-# Ini adalah "Database Palsu" yang akan kita pakai
+# ==============================================================================
+# 2. FIXTURE: SEED DATA UMUM (Untuk Film Populer, Genre, dll)
+# ==============================================================================
 @pytest.fixture
-def mock_db_session():
-    return MagicMock()
+def seed_data():
+    db = TestingSessionLocal()
+    try:
+        # Bersihkan tabel
+        db.query(OrderSeat).delete()
+        db.query(Order).delete()
+        db.query(Jadwal).delete()
+        db.query(Movie).delete()
+        db.query(Studio).delete()
+        db.commit()
+    except:
+        db.rollback()
 
-# Ini fungsi untuk menukar database asli dengan database palsu saat test jalan
+    # 1. Movies
+    m1 = Movie(code="M01", title="Film A", genre="Action", durasi=120, price=50000)
+    m2 = Movie(code="M02", title="Film B", genre="Comedy", durasi=100, price=50000)
+    db.add_all([m1, m2])
+    db.commit()
+
+    # 2. Studio (Wajib ada biar join ga error)
+    st = Studio(code="S01", name="Studio 1", rows=5, cols=5)
+    db.add(st)
+    db.commit()
+
+    # 3. Jadwal (Tanggal 5 Des 2024)
+    tgl = datetime.date(2024, 12, 5)
+    j1 = Jadwal(code="J01", movie_id=m1.id, studio_id=st.id, tanggal=tgl, jam=datetime.time(14,0))
+    j2 = Jadwal(code="J02", movie_id=m2.id, studio_id=st.id, tanggal=tgl, jam=datetime.time(16,0))
+    db.add_all([j1, j2])
+    db.commit()
+
+    # 4. Orders
+    o1 = Order(code="O01", jadwal_id=j1.id, payment_method="QRIS", transaction_date=tgl, final_price=100000)
+    o2 = Order(code="O02", jadwal_id=j2.id, payment_method="Cash", transaction_date=tgl, final_price=50000)
+    db.add_all([o1, o2])
+    db.commit()
+
+    # 5. Seats (Total 3 tiket)
+    s1 = OrderSeat(order_id=o1.id, jadwal_id=j1.id, studio_id=st.id, row="A", col=1)
+    s2 = OrderSeat(order_id=o1.id, jadwal_id=j1.id, studio_id=st.id, row="A", col=2)
+    s3 = OrderSeat(order_id=o2.id, jadwal_id=j2.id, studio_id=st.id, row="A", col=3)
+    db.add_all([s1, s2, s3])
+    db.commit()
+    db.close()
+
+# ==============================================================================
+# 3. FIXTURE: SEED DATA TIFF (Untuk Revenue, Customer, Busiest Day)
+# ==============================================================================
 @pytest.fixture
-def override_get_db(mock_db_session):
-    def _override_get_db():
-        try:
-            yield mock_db_session
-        finally:
-            pass
-    app.dependency_overrides[get_db] = _override_get_db
-    yield
-    # Kembalikan ke database asli setelah test selesai
-    app.dependency_overrides = {}
+def seed_data_tiff():
+    db = TestingSessionLocal()
+    try:
+        # Bersihkan tabel
+        db.query(OrderSeat).delete()
+        db.query(Order).delete()
+        db.query(Jadwal).delete()
+        db.query(Movie).delete()
+        db.query(Studio).delete()
+        db.query(Membership).delete()
+        db.commit()
+    except:
+        db.rollback()
 
+    # Data Khusus Analisis Tiff (1 Des 2024)
+    m1 = Movie(code="MV1", title="Action Movie", genre="Action", durasi=120, price=50000)
+    m2 = Movie(code="MV2", title="Drama Movie", genre="Drama", durasi=100, price=40000)
+    db.add_all([m1, m2])
+    db.commit()
 
-# ==========================================
-# TEST 1: Analisis Pendapatan Film (Top Revenue)
-# ==========================================
-def test_get_top_revenue_films_success(mock_db_session, override_get_db):
-    # 1. SETUP: Siapkan data palsu
-    # Kita pura-pura database mengembalikan 1 film juara
-    mock_result = MagicMock()
-    mock_result.title = "Avengers: Endgame"
-    mock_result.total_revenue = 5000000
-    
-    # Konfigurasi mock agar mengembalikan data ini saat di-query
-    mock_db_session.query.return_value.join.return_value.join.return_value.filter.return_value.filter.return_value.group_by.return_value.order_by.return_value.first.return_value = mock_result
+    st = Studio(code="ST1", name="Studio 1", rows=5, cols=5)
+    db.add(st)
+    db.commit()
 
-    # 2. ACTION: Panggil endpoint lewat TestClient
-    response = client.get("/analisis/top-revenue-films?period=minggu")
+    mem = Membership(code="MM1", nama="Tester")
+    db.add(mem)
+    db.commit()
 
-    # 3. ASSERT: Cek apakah hasilnya benar
+    tgl = datetime.date(2024, 12, 1)
+    j1 = Jadwal(code="JD1", movie_id=m1.id, studio_id=st.id, tanggal=tgl, jam=datetime.time(10,0))
+    j2 = Jadwal(code="JD2", movie_id=m2.id, studio_id=st.id, tanggal=tgl, jam=datetime.time(13,0))
+    db.add_all([j1, j2])
+    db.commit()
+
+    # Transaksi: Action 2 tiket, Action 1 tiket, Drama 1 tiket
+    # PENTING: membership_code diisi manual stringnya agar join berhasil
+    o1 = Order(code="OR1", membership_id=mem.id, membership_code="MM1", jadwal_id=j1.id, payment_method="QRIS", seat_count=2, final_price=100000, transaction_date=tgl)
+    o2 = Order(code="OR2", membership_id=mem.id, membership_code="MM1", jadwal_id=j1.id, payment_method="CASH", seat_count=1, final_price=50000, transaction_date=tgl)
+    o3 = Order(code="OR3", membership_id=mem.id, membership_code="MM1", jadwal_id=j2.id, payment_method="QRIS", seat_count=1, final_price=40000, transaction_date=tgl)
+    db.add_all([o1, o2, o3])
+    db.commit()
+
+    db.add_all([
+        OrderSeat(order_id=o1.id, jadwal_id=j1.id, studio_id=st.id, row="A", col=1),
+        OrderSeat(order_id=o1.id, jadwal_id=j1.id, studio_id=st.id, row="A", col=2),
+        OrderSeat(order_id=o2.id, jadwal_id=j1.id, studio_id=st.id, row="A", col=3),
+        OrderSeat(order_id=o3.id, jadwal_id=j2.id, studio_id=st.id, row="B", col=1)
+    ])
+    db.commit()
+    db.close()
+
+# ==============================================================================
+# 4. TEST CASES (GROUP 1: NASTAR KEJU / UMUM)
+# ==============================================================================
+# URL SUDAH DIPERBAIKI menyesuaikan router 'analisis_tiff.py' kamu
+# /analisis/filmpopuler?periode=...
+
+def test_filmpopuler_daily(seed_data):
+    # Dulu: /analisis/filmpopuler/daily?day=1 -> Salah (404)
+    # Sekarang: /analisis/filmpopuler?periode=harian&hari=5
+    response = client.get("/analisis/filmpopuler?periode=harian&hari=5")
     assert response.status_code == 200
     data = response.json()
-    
-    # Cek struktur respon
-    assert "hasil_analisis" in data
-    assert data["request_period"] == "minggu"
-    
-    # Cek apakah datanya sesuai dengan mock kita
-    # Karena kita looping 5 minggu, kita cek salah satunya
-    first_item = data["hasil_analisis"][0]
-    assert first_item["film_juara"] == "Avengers: Endgame"
-    assert first_item["pendapatan"] == 5000000
+    assert "tanggal" in data
+    assert "data" in data
+    assert isinstance(data["data"], list)
 
-def test_get_top_revenue_films_no_param(override_get_db):
-    # Test kalau user lupa isi param period
-    response = client.get("/analisis/top-revenue-films") # Tanpa ?period=...
+def test_filmpopuler_weekly(seed_data):
+    # Dulu: /analisis/filmpopuler/weekly -> Salah (404)
+    # Sekarang: /analisis/filmpopuler?periode=mingguan
+    response = client.get("/analisis/filmpopuler?periode=mingguan")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "info"
-    assert "Tolong pilih periode dulu" in data["pesan"]
+    assert "data" in data
+    assert isinstance(data["data"], list)
 
-
-# ==========================================
-# TEST 2: Analisis Pelanggan (Top Customer)
-# ==========================================
-def test_get_top_customers_success(mock_db_session, override_get_db):
-    # 1. SETUP: Siapkan data pelanggan juara palsu
-    mock_member = MagicMock()
-    mock_member.nama = "Budi Santoso"
-    mock_member.member_id = 101
-    mock_member.total_transaksi = 5
-
-    # Rantai query mock yang panjang (sesuai kode aslimu)
-    mock_db_session.query.return_value.join.return_value.filter.return_value.filter.return_value.group_by.return_value.order_by.return_value.first.return_value = mock_member
-
-    # 2. ACTION: Panggil endpoint
-    response = client.get("/analisis/top-customers?period=bulan")
-
-    # 3. ASSERT
+def test_filmpopuler_monthly(seed_data):
+    # Dulu: /analisis/filmpopuler/monthly?bulan=Desember -> Salah (404)
+    # Sekarang: /analisis/filmpopuler?periode=bulanan&bulan=Desember
+    response = client.get("/analisis/filmpopuler?periode=bulanan&bulan=Desember")
     assert response.status_code == 200
     data = response.json()
-    
-    # Cek hasil
-    assert data["request_period"] == "bulan"
-    # Karena period='bulan', cuma ada 1 item di list hasil
-    assert len(data["hasil_analisis"]) == 1
-    
-    juara = data["hasil_analisis"][0]
-    assert juara["pelanggan_juara"] == "Budi Santoso"
-    assert juara["jumlah_transaksi"] == 5
+    assert "bulan" in data
+    assert "data" in data
 
-
-# ==========================================
-# TEST 3: Analisis Hari Teramai (Most Busiest Day)
-# ==========================================
-def test_get_busiest_day_success(mock_db_session, override_get_db):
-    # 1. SETUP: Siapkan 2 jenis data mock
-    
-    # Mock A: Top Dates (Tanggal Teramai)
-    mock_date_1 = MagicMock()
-    mock_date_1.transaction_date = date(2024, 12, 11)
-    mock_date_1.total_tiket = 150
-    
-    # Mock B: Top Days (Hari Teramai - Senin/Selasa)
-    mock_day_1 = MagicMock()
-    mock_day_1.nama_hari = "Wednesday"
-    mock_day_1.total_tiket = 500
-
-    # Karena di fungsi aslimu ada 2 kali query db.query(...).all(),
-    # Kita harus mock `side_effect` agar query pertama dpt Mock A, query kedua dpt Mock B
-    
-    # Query 1 (Top Dates) & Query 2 (Top Days)
-    # Ini trik mock tingkat lanjut karena querynya mirip
-    mock_db_session.query.return_value.filter.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [mock_date_1]
-    mock_db_session.query.return_value.filter.return_value.filter.return_value.group_by.return_value.order_by.return_value.all.return_value = [mock_day_1]
-
-    # 2. ACTION
-    response = client.get("/analisis/most-busiest-day?bulan=12&tahun=2024")
-
-    # 3. ASSERT
+def test_jamtayang_daily(seed_data):
+    # Dulu: /analisis/jamtayangpopuler/daily -> Salah (404)
+    response = client.get("/analisis/jamtayangpopuler?periode=harian&hari=5")
     assert response.status_code == 200
     data = response.json()
+    assert "data" in data
+
+def test_jamtayang_weekly(seed_data):
+    response = client.get("/analisis/jamtayangpopuler?periode=mingguan")
+    assert response.status_code == 200
+    data = response.json()
+    assert "data" in data
+
+def test_jamtayang_monthly(seed_data):
+    response = client.get("/analisis/jamtayangpopuler?periode=bulanan&bulan=Desember")
+    assert response.status_code == 200
+    data = response.json()
+    assert "data" in data
+
+def test_invalid_month(seed_data):
+    response = client.get("/analisis/filmpopuler?periode=bulanan&bulan=xxx")
+    assert response.status_code == 200
+    assert "error" in response.json()
+
+def test_metode_pembayaran(seed_data):
+    response = client.get("/analisis/metodepembayaran")
+    assert response.status_code == 200
+    result = response.json()["data"]
+    assert len(result) >= 2
+
+
+# ==============================================================================
+# 5. TEST CASES (GROUP 2: TIFF)
+# ==============================================================================
+
+def test_tiff_top_revenue_daily(seed_data_tiff):
+    res = client.get("/analisis/top-revenue-films?period=hari")
+    assert res.status_code == 200
+    # Mencari hasil untuk "Tanggal 1"
+    hasil = next((x for x in res.json()["hasil_analisis"] if "Tanggal 1" in x["periode"]), None)
+    assert hasil is not None
+    assert hasil["film_juara"] == "Action Movie"
+    assert float(hasil["pendapatan"]) == 150000.0
+
+def test_tiff_top_customers_monthly(seed_data_tiff):
+    res = client.get("/analisis/top-customers?period=bulan")
+    assert res.status_code == 200
+    # Ambil elemen pertama dari list hasil
+    bulan_des = res.json()["hasil_analisis"][0]
     
-    # Cek Kesimpulan
-    assert "Most Busiest Time Analysis" in data["kesimpulan"]["judul"]
-    assert "Wednesday" in data["kesimpulan"]["tanggal_tersibuk"]
-    assert "150" in str(data["kesimpulan"]["tanggal_tersibuk"]) # Cek angka tiket
+    assert bulan_des["pelanggan_juara"] == "Tester"
+    assert bulan_des["jumlah_transaksi"] == 3
+
+def test_tiff_most_busiest_day(seed_data_tiff):
+    # Menggunakan MySQL asli, fungsi SQL 'dayname' akan dikenali
+    res = client.get("/analisis/most-busiest-day?bulan=12&tahun=2024")
+    assert res.status_code == 200
+    data = res.json()
     
-    # Cek Detail
-    assert len(data["top_5_tanggal_teramai"]) == 1
-    assert data["ranking_hari_teramai"][0]["nama_hari"] == "Wednesday"
+    assert "4 tiket" in data["kesimpulan"]["tanggal_tersibuk"]
+    
+    top_day = data["ranking_hari_teramai"][0]
+    # Bisa 'Sunday' atau 'Minggu' tergantung locale MySQL kamu
+    assert top_day["nama_hari"] in ["Sunday", "Minggu"]
+    assert int(top_day["total_akumulasi_tiket"]) == 4
