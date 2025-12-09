@@ -64,12 +64,10 @@ def get_schedules(db: Session = Depends(get_db)):
 @router.post("", response_model=ScheduleOut)
 def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
 
-    # cek movie
     movie = db.query(Movie).filter(Movie.code == item.movie_code).first()
     if not movie:
         raise HTTPException(404, "Movie tidak ditemukan")
 
-    # cek studio
     studio = db.query(Studio).filter(Studio.code == item.studio_code).first()
     if not studio:
         raise HTTPException(404, "Studio tidak ditemukan")

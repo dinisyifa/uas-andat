@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, extract
 from datetime import date, datetime, timedelta
@@ -315,68 +315,80 @@ def analisis_efektivitas_promo(db: Session = Depends(get_db)):
 # 4. Kursi paling populer
 @router.get("/analisis/kursipopuler/{mode}")
 def kursi_paling_populer(
-    mode: str,
-    tanggal: Optional[str] = Query(None, description="Harian: angka | Bulanan: nama bulan | YYYY-MM-DD"),
-    db: Session = Depends(get_db),
+    mode: str = Path(..., description="Periode analisis: harian | mingguan | bulanan"), # Gunakan Path untuk deskripsi di Swagger
+    tanggal: str = Query(None, description="Tanggal dasar (YYYY-MM-DD). Default: hari ini."), # Gunakan Query untuk deskripsi di Swagger
+    db: Session = Depends(get_db)
 ):
+    print("🔍 Mode diterima:", mode)
 
-    mode_map = {"harian": 0, "mingguan": 1, "bulanan": 2}
-    if mode not in mode_map:
+    if mode not in ["harian", "mingguan", "bulanan"]:
+        print("❌ Mode invalid")
         raise HTTPException(status_code=400, detail="Mode harus harian, mingguan, atau bulanan.")
 
-    today = date.today()
-
-    if mode == "bulanan":
+    # Tanggal
+    try:
         if tanggal:
-            bulan_lower = tanggal.lower()
-            if bulan_lower not in MONTH_NAMES:
-                raise HTTPException(status_code=400, detail="Gunakan nama bulan valid, contoh: desember")
-            bulan = MONTH_NAMES[bulan_lower]
-            tahun = today.year
-            start = date(tahun, bulan, 1)
-            if bulan == 12:
-                end = date(tahun, 12, 31)
-            else:
-                end = date(tahun, bulan + 1, 1) - timedelta(days=1)
+            tgl = datetime.strptime(tanggal, "%Y-%m-%d").date()
         else:
-            start = today.replace(day=1)
-            end = (start.replace(month=start.month % 12 + 1, day=1) - timedelta(days=1))
+            tgl = date.today()
+        print("📅 Tanggal dasar:", tgl)
+    except Exception as e:
+        print("❌ Parsing tanggal error:", e)
+        raise HTTPException(status_code=400, detail="Format tanggal salah. Gunakan YYYY-MM-DD.")
 
-    elif mode == "harian":
-        if tanggal and tanggal.isdigit():
-            tgl_angka = int(tanggal)
-            start = end = date(today.year, today.month, tgl_angka)
-        else:
-            start = end = today
-
+    # Tentukan Range
+    if mode == "harian":
+        start = tgl
+        end = tgl
     elif mode == "mingguan":
-        if tanggal:
-            try:
-                tgl = datetime.strptime(tanggal, "%Y-%m-%d").date()
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
-        else:
-            tgl = today
+        # ... (Logika penentuan tanggal mingguan tetap sama dan sudah benar)
         start = tgl - timedelta(days=tgl.weekday())
         end = start + timedelta(days=6)
+    else: # mode == "bulanan"
+        # ... (Logika penentuan tanggal bulanan tetap sama dan sudah benar)
+        start = tgl.replace(day=1)
+        if start.month == 12:
+            end = date(start.year, 12, 31)
+        else:
+            end = date(start.year, start.month + 1, 1) - timedelta(days=1)
 
-    start_str = start.isoformat()
-    end_str = end.isoformat()
+    print("📌 Rentang query:", start, "→", end)
 
-    query = get_top5_kursi_query_mysql()
-    result = db.execute(query, {"start_date": start_str, "end_date": end_str}).mappings().all()
+    # Query ke DB
+    try:
+        query = text("""
+            SELECT 
+                CONCAT(os.row, os.col) AS kursi_kode,
+                COUNT(os.id) AS jumlah_pemesanan
+            FROM order_seats os
+            JOIN jadwal j ON os.jadwal_id = j.id -- PERBAIKAN 1: Gunakan 'jadwal' (tunggal)
+            WHERE j.tanggal BETWEEN :start_date AND :end_date -- PERBAIKAN 2: Gunakan kolom 'tanggal'
+            GROUP BY kursi_kode
+            ORDER BY jumlah_pemesanan DESC
+            LIMIT 5;
+        """)
+        
+        result = db.execute(query, {
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat()
+        }).mappings().all()
+
+        print("🎯 DB Result:", result)
+
+    except Exception as e:
+        print("🔥 SQL ERROR:", e)
+        # Anda mungkin ingin menampilkan e dalam log server, tetapi hindari mengirimkannya langsung ke pengguna.
+        raise HTTPException(status_code=500, detail="SQL bermasalah atau data tidak ada.")
 
     return {
         "mode": mode,
-        "tanggal_awal": start_str,
-        "tanggal_akhir": end_str,
+        "tanggal_awal": start.isoformat(),
+        "tanggal_akhir": end.isoformat(),
         "top_5_kursi": [
-            {"kursi_kode": row["kursi_kode"], "jumlah_pemesanan": int(row["jumlah_pemesanan"])}
-            for row in result
+            {"kursi_kode": r["kursi_kode"], "jumlah_pemesanan": r["jumlah_pemesanan"]}
+            for r in result
         ],
-        "count": len(result)
     }
-
 
 # 5. Pendapatan Film Terbanyak (Juara per Periode)
 @router.get("/analisis/top-revenue-films")

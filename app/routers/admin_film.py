@@ -119,7 +119,7 @@ class StudioInput(BaseModel):
 
 class StudioOut(BaseModel):
     code: str
-    nama: str
+    name: str
     rows: int
     cols: int
 
@@ -154,7 +154,7 @@ def add_studio(item: StudioInput, db: Session = Depends(get_db)):
     studio = Studio(
         id=next_id,       
         code=code,
-        nama=nama,
+        name=nama,
         rows=item.rows,
         cols=item.cols
     )

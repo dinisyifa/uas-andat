@@ -18,8 +18,7 @@ def ensure_minimal_data():
     movie = db.query(Movie).first()
     if not movie:
         movie = Movie(
-            id=1,
-            code="MOV001",
+            code="MOV001", # <-- Hapus id=1
             title="Film Uji",
             genre="Action",
             durasi=120,
@@ -34,8 +33,7 @@ def ensure_minimal_data():
     studio = db.query(Studio).first()
     if not studio:
         studio = Studio(
-            id=1,
-            code="ST001",
+            code="ST001", # <-- Hapus id=1
             name="Studio 1",
             rows=3,
             cols=4
@@ -43,19 +41,14 @@ def ensure_minimal_data():
         db.add(studio)
         db.commit()
         db.refresh(studio)
-
-    seats = db.query(StudioSeat).filter(StudioSeat.studio_id == studio.id).all()
-    if not seats:
-        for r in ["A", "B", "C"]:
-            for c in range(1, 5):
-                db.add(StudioSeat(studio_id=studio.id, row=r, col=c))
-        db.commit()
-
+    
+    # ... (lanjutkan untuk StudioSeat dan Jadwal)
+    
+    # Untuk Jadwal
     jadwal = db.query(Jadwal).filter(Jadwal.movie_id == movie.id).first()
     if not jadwal:
         jadwal = Jadwal(
-            id=1,
-            code="JAD001",
+            code="JAD001", # <-- Hapus id=1
             studio_id=studio.id,
             movie_id=movie.id,
             tanggal=date(2024, 12, 1),
@@ -64,6 +57,13 @@ def ensure_minimal_data():
         db.add(jadwal)
         db.commit()
         db.refresh(jadwal)
+    
+    seats = db.query(StudioSeat).filter(StudioSeat.studio_id == studio.id).all()
+    if not seats:
+        for r in ["A", "B", "C"]:
+            for c in range(1, 5):
+                db.add(StudioSeat(studio_id=studio.id, row=r, col=c))
+        db.commit()
 
     db.close()
     return movie, studio, jadwal
