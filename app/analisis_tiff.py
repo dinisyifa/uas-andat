@@ -37,19 +37,19 @@ def get_top_revenue_films(
     # 2. menentukan Rentang Tanggal (Ranges) berdasarkan Desember 2024
     ranges = []
     
-    if period == "Tiap Hari Pada Bulan Desember 2024":
+    if period == "hari":
         # Loop tanggal 1 sampai 31
         for d in range(1, 32):
-            ranges.append((d, d, f"Tanggal {d} Des"))
+            ranges.append((d, d, f"Tanggal {d} Desember 2024"))
             
     elif period == "minggu":
         # Manual definisi minggu
         ranges = [
-            (1, 7, "Minggu 1 (1-7 Des)"),
-            (8, 14, "Minggu 2 (8-14 Des)"),
-            (15, 21, "Minggu 3 (15-21 Des)"),
-            (22, 28, "Minggu 4 (22-28 Des)"),
-            (29, 31, "Minggu 5 (29-31 Des)")
+            (1, 7, "Minggu 1 (1-7 Desember 2024)"),
+            (8, 14, "Minggu 2 (8-14 Desember 2024)"),
+            (15, 21, "Minggu 3 (15-21 Desember 2024)"),
+            (22, 28, "Minggu 4 (22-28 Desember 2024)"),
+            (29, 31, "Minggu 5 (29-31 Desember 2024)")
         ]
         
     elif period == "bulan":
@@ -149,14 +149,14 @@ def get_top_customers(
         # Query: Cari member dengan frekuensi order terbanyak (count order.id)
         top_member = (
             db.query(
-                Membership.id.label("member_id"),
+                Membership.code.label("member_code"),
                 Membership.nama,
                 func.count(Order.id).label("total_transaksi")
             )
-            .join(Order, Membership.id == Order.membership_id)
+            .join(Order, Membership.code == Order.membership_code)
             .filter(Order.transaction_date >= start_date)
             .filter(Order.transaction_date <= end_date)
-            .group_by(Membership.id, Membership.nama) # Grouping berdasarkan ID dan Nama
+            .group_by(Membership.code, Membership.nama) # Grouping berdasarkan code dan Nama
             .order_by(desc("total_transaksi"))
             .first() # Ambil Juara 1
         )
@@ -165,14 +165,14 @@ def get_top_customers(
             output_data.append({
                 "periode": label,
                 "pelanggan_juara": top_member.nama,
-                "id_pelanggan": top_member.member_id,
+                "code_pelanggan": top_member.member_code,
                 "jumlah_transaksi": top_member.total_transaksi
             })
         else:
             output_data.append({
                 "periode": label,
                 "pelanggan_juara": "Tidak ada transaksi",
-                "id_pelanggan": None,
+                "code_pelanggan": None,
                 "jumlah_transaksi": 0
             })
 
@@ -184,30 +184,24 @@ def get_top_customers(
     }
 
 
-
 # --- 3. Most Busiest Day ---
-# Pastikan ada import ini di paling atas file
 import calendar 
-
-# ... (kode analisis 1 dan 2 biarkan saja) ...
-
 # ==========================================
 # 3. ANALISIS TANGGAL & HARI TERAMAI (Most Busiest Date & Day)
 # ==========================================
 @router.get("/most-busiest-day")
 def get_busiest_day(
-    bulan: int = Query(12, ge=1, le=12, description="Bulan (1-12)"),
+    bulan: int = Query(12, description="Bulan (1-12)"),
     tahun: int = Query(2024, description="Tahun"),
     db: Session = Depends(get_db)
 ):
-    """
-    Analisis Keramaian Bioskop:
-    1. Mencari TANGGAL spesifik teramai (Top 5).
-    2. Mencari HARI apa (Senin-Minggu) yang secara umum paling diminati penonton.
-    """
     
+    if bulan != 12 or tahun != 2024:
+        return {
+            "message": f"Tidak ada data transaksi di periode yang diminta. Untuk saat ini, hanya ada data bulan Desember 2024."
+        }
+
     # --- BAGIAN A: TANGGAL TERAMAI (Specific Date) ---
-    # Mencari tanggal spesifik (misal: 11 Des) dengan penjualan tertinggi
     top_dates = (
         db.query(
             Order.transaction_date,
@@ -217,12 +211,10 @@ def get_busiest_day(
         .filter(extract('year', Order.transaction_date) == tahun)
         .group_by(Order.transaction_date)
         .order_by(desc("total_tiket"))
-        .limit(5) # Cuma ambil Top 5 sesuai request
+        .limit(5)
         .all()
     )
 
-    if not top_dates:
-        return {"message": "Tidak ada data transaksi di periode ini."}
 
     # --- BAGIAN B: HARI TERAMAI (Day of Week Analysis) ---
     # Menjumlahkan tiket berdasarkan Nama Hari (Semua Senin dijumlah, Semua Selasa dijumlah, dst)
