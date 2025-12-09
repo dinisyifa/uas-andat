@@ -1,134 +1,169 @@
+import pytest
 from fastapi.testclient import TestClient
-from app.main import app 
+from sqlalchemy import text
+from app.main import app
+from app.database import SessionLocal
+from app.models import Movie, Studio, Membership, Jadwal, Order, OrderSeat
 
 client = TestClient(app)
 
+@pytest.fixture
+def db_session():
+    db = SessionLocal()
 
-# ============================
-# TEST CRUD MOVIES
-# ============================
+    db.execute(text("SET FOREIGN_KEY_CHECKS=0;"))
+    db.execute(text("TRUNCATE TABLE order_seats;"))
+    db.execute(text("TRUNCATE TABLE orders;"))
+    db.execute(text("TRUNCATE TABLE Jadwal;"))
+    db.execute(text("TRUNCATE TABLE movies;"))
+    db.execute(text("TRUNCATE TABLE studios;"))
+    db.execute(text("TRUNCATE TABLE memberships;"))
+    db.execute(text("SET FOREIGN_KEY_CHECKS=1;"))
+    db.commit()
 
-def test_get_all_movies():
-    response = client.get("/movies")
-    assert response.status_code == 200
-    data = response.json()
-    assert "data" in data
-    assert isinstance(data["data"], list)
+    yield db
+    db.close()
 
-
-def test_get_single_movie():
-    response = client.get("/movies/mov1")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["data"]["id"] == "mov1"
-
-
-def test_create_movie_success():
-    new_movie = {
-        "id": "mov99",
-        "title": "Testing The Movie",
-        "duration": "123 menit",
-        "genre": "Sci-Fi",
-        "sutradara": "John Doe",
-        "rating_usia": "13+",
-        "price": "Rp50.000"
-    }
-    response = client.post("/movies", json=new_movie)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["data"]["id"] == "mov99"
-
-
-def test_create_movie_duplicate_id():
-    new_movie = {
-        "id": "mov99",
-        "title": "Duplicate Test",
-        "duration": "120 menit",
+def test_add_movie(db_session):
+    res = client.post("/movies", json={
+        "title": "Avatar",
         "genre": "Action",
-        "sutradara": "Jane Doe",
-        "rating_usia": "PG-13",
-        "price": "Rp45.000"
-    }
-    response = client.post("/movies", json=new_movie)
-    assert response.status_code == 400
-    assert response.json()["detail"] == "ID film sudah ada"
+        "durasi": 180,
+        "director": "James Cameron",
+        "rating": "PG-13"
+    })
+    assert res.status_code == 200
+    assert "MOV" in res.json()["data"]["code"]
 
 
-def test_update_movie():
-    updated_data = {
-        "id": "mov99",
-        "title": "Updated Movie",
-        "duration": "150 menit",
-        "genre": "Drama",
-        "sutradara": "Tester",
-        "rating_usia": "17+",
-        "price": "Rp60.000"
-    }
-    response = client.put("/movies/mov99", json=updated_data)
-    assert response.status_code == 200
-    assert response.json()["data"]["title"] == "Updated Movie"
+def test_get_movies(db_session):
+    db_session.add(Movie(id=1, code="MOV001", title="Test Film", genre="Drama", 
+                         durasi=120, director="Dir", rating="PG", price=45000))
+    db_session.commit()
+
+    res = client.get("/movies")
+    assert res.status_code == 200
+    assert len(res.json()["data"]) == 1
 
 
-def test_delete_movie():
-    response = client.delete("/movies/mov99")
-    assert response.status_code == 200
-    assert "berhasil dihapus" in response.json()["message"]
+def test_update_movie_success(db_session):
+    db_session.add(Movie(id=1, code="MOV001", title="Old", genre="Drama", 
+                         durasi=100, director="Some", rating="R", price=30000))
+    db_session.commit()
+
+    res = client.put("/movies/MOV001", json={
+        "title": "New Title",
+        "genre": "Action",
+        "durasi": 150,
+        "director": "A",
+        "rating": "PG"
+    })
+
+    assert res.status_code == 200
+    assert res.json()["data"]["title"] == "New Title"
 
 
-def test_get_deleted_movie_should_fail():
-    response = client.get("/movies/mov99")
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Film tidak ditemukan"
-
-# ============================
-# TEST CRUD STUDIOS
-# ============================
-
-def test_get_all_studios():
-    response = client.get("/studios")
-    assert response.status_code == 200
-    data = response.json()
-    assert "data" in data
-    assert isinstance(data["data"], list)
+def test_update_movie_not_found(db_session):
+    res = client.put("/movies/MOV999", json={
+        "title": "X",
+        "genre": "Y",
+        "durasi": 90,
+        "director": "Z",
+        "rating": "PG"
+    })
+    assert res.status_code == 404
 
 
-def test_create_studio_success():
-    new_studio = {
-        "id": "st99",
-        "name": "Studio 99",
-        "capacity" : 96
-    }
-    response = client.post("/studios", json=new_studio)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["data"]["id"] == "st99"
-    assert data["data"]["name"] == "Studio 99"
+def test_delete_movie(db_session):
+    client.post("/movies", json={
+        "title": "Test Movie",
+        "genre": "Action",
+        "durasi": 120,
+        "director": "Someone",
+        "rating": "PG-13"
+    })
+
+    db_session.query(Jadwal).delete()
+    db_session.commit()
+
+    res = client.delete("/movies/MOV001")
+    assert res.status_code == 200
 
 
-def test_create_studio_duplicate_id():
-    new_studio = {
-        "id": "st99",
-        "name": "Studio 99",
-        "capacity" : 96
-    }
-    response = client.post("/studios", json=new_studio)
-    assert response.status_code == 400
-    assert response.json()["detail"] == "ID studio sudah ada"
+def test_add_studio(db_session):
+    res = client.post("/studios", json={"rows": 8, "cols": 12})
+    assert res.status_code == 200
+    assert "ST" in res.json()["data"]["code"]
 
 
-def test_update_studio():
-    updated_studio = {
-        "id": "st99",
-        "name": "Studio 99",
-        "capacity" : 96
-    }
-    response = client.put("/studios/st99", json=updated_studio)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["data"]["capacity"] == 96
+def test_get_studios(db_session):
+    db_session.add(Studio(id=1, code="ST001", name="Studio 1", rows=8, cols=12))
+    db_session.commit()
+
+    res = client.get("/studios")
+    assert res.status_code == 200
+    assert len(res.json()["data"]) == 1
 
 
-def test_delete_studio():
-    response = client.delete("/studios/st99")
-    assert response.status_code == 200
-    assert "berhasil dihapus" in response.json()["message"]
+def test_update_studio_success(db_session):
+    db_session.add(Studio(id=1, code="ST001", name="Studio 1", rows=6, cols=10))
+    db_session.commit()
+
+    res = client.put("/studios/ST001", json={"rows": 10, "cols": 15})
+    assert res.status_code == 200
+    assert res.json()["rows"] == 10
+
+
+def test_update_studio_not_found(db_session):
+    res = client.put("/studios/ST999", json={"rows": 8, "cols": 12})
+    assert res.status_code == 404
+
+
+def test_delete_studio(db_session):
+    db_session.add(Studio(id=1, code="ST001", name="Studio 1", rows=8, cols=12))
+    db_session.commit()
+
+    db_session.query(Jadwal).delete()
+    db_session.commit()
+
+    res = client.delete("/studios/ST001")
+    assert res.status_code == 200
+
+
+
+def test_add_membership(db_session):
+    res = client.post("/members", json={"nama": "John"})
+    assert res.status_code == 200
+    assert "MEM" in res.json()["data"]["code"]
+
+
+def test_get_memberships(db_session):
+    db_session.add(Membership(id=1, code="MEM001", nama="Test Member"))
+    db_session.commit()
+
+    res = client.get("/members")
+    assert res.status_code == 200
+    assert len(res.json()["data"]) == 1
+
+
+def test_update_membership_success(db_session):
+    db_session.add(Membership(id=1, code="MEM001", nama="User"))
+    db_session.commit()
+
+    res = client.put("/members/MEM001", json={"nama": "Updated"})
+    assert res.status_code == 200
+    assert res.json()["nama"] == "Updated"
+
+
+def test_update_membership_not_found(db_session):
+    res = client.put("/members/MEM999", json={"nama": "X"})
+    assert res.status_code == 404
+
+
+def test_delete_membership(db_session):
+    db_session.add(Membership(id=1, code="MEM001", nama="User"))
+    db_session.commit()
+
+    res = client.delete("/members/MEM001")
+    assert res.status_code == 200
+    assert "berhasil dihapus" in res.json()["status"]

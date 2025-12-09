@@ -1,36 +1,46 @@
-# app/routers/user_catalog.py
-from fastapi import APIRouter, HTTPException
-from typing import List, Dict, Any
-
-# Import data dari admin
-from app.routers.admin_film import list_film
-from app.routers.admin_jadwal import list_jadwal
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from datetime import date
+from typing import List
+from app.database import get_db
+from app.models import Movie, Jadwal, Studio, StudioSeat, OrderSeat, Cart
 
 router = APIRouter()
 
-# =============================================== API KATALOG ================================================
+def movie_to_public_dict(m: Movie) -> dict:
+    return {
+        "code": m.code,         
+        "title": m.title,
+        "duration": m.durasi,
+        "price": m.price,
+        "genre": m.genre,
+        "rating_usia": m.rating,
+        "sutradara": m.director,
+    }
 
-# READ - Lihat semua film yang sedang tayang
+
+# now playing
 @router.get("/now_playing")
-def now_playing():
-    """
-    Menampilkan daftar semua film yang sedang tayang.
-    (Mengambil dari list_film di admin_film.py)
-    """
-    if not list_film:
-        raise HTTPException(status_code=404, detail="Tidak ada film yang sedang tayang.")
+def now_playing(db: Session = Depends(get_db)):
+    """Menampilkan seluruh daftar film yang sedang tayang."""
+    today = date(2024, 12, 1) 
 
-    data_ringkas = [
-        {
-            "id": film["id"],
-            "title": film["title"],
-            "genre": film.get("genre", "-"),
-            "duration": film.get("duration", "-"),
-            "rating_usia": film.get("rating_usia", "-"),
-            "price": film.get("price", 0)
-        }
-        for film in list_film
-    ]
+    movies = (
+        db.query(Movie)
+        .join(Jadwal, Jadwal.movie_id == Movie.id)
+        .filter(Jadwal.tanggal >= today) 
+        .distinct()
+        .all()
+    )
+
+    if not movies:
+        raise HTTPException(
+            status_code=404,
+            detail="Tidak ada film yang sedang tayang."
+        )
+
+    data_ringkas = [movie_to_public_dict(m) for m in movies]
+
     return {
         "message": "Daftar film yang sedang tayang berhasil diambil",
         "count": len(data_ringkas),
@@ -38,82 +48,159 @@ def now_playing():
     }
 
 
-# READ - Lihat detail film dan jadwalnya
-@router.get("/now_playing/{movie_id}/details")
-def detail_film(movie_id: str):
+
+# now playing/{movie_code}/details
+@router.get("/now_playing/{movie_code}/details")
+def detail_film(movie_code: str, db: Session = Depends(get_db)):
     """
-    Menampilkan detail film dan semua jadwal tayangnya.
+    Menampilkan detail film + semua jadwal tayangnya.
+    Parameter diisi dengan movie code: MOVXXX (contoh: MOV001).
     """
-    # cari film
-    movie = next((f for f in list_film if f["id"] == movie_id or f["id"] == f"mov{movie_id}"), None)
+
+    movie = db.query(Movie).filter(Movie.code == movie_code).first()
     if not movie:
-        raise HTTPException(status_code=404, detail=f"Film dengan ID {movie_id} tidak ditemukan.")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Film dengan kode {movie_code} tidak ditemukan."
+        )
 
-    # cari jadwal berdasarkan movie_id (cocokkan dengan atau tanpa prefix 'mov')
-    movie_schedules = [
-    j for j in list_jadwal
-    if j["movie_id"].replace("mov", "") == movie["id"].replace("mov", "")
-    ]
+    rows = (
+        db.query(Jadwal, Studio)
+        .join(Studio, Studio.id == Jadwal.studio_id)
+        .filter(Jadwal.movie_id == movie.id)
+        .order_by(Jadwal.tanggal, Jadwal.jam)
+        .all()
+    )
 
-    return {
-        "id": movie["id"],
-        "title": movie["title"],
-        "sutradara": movie.get("sutradara", "-"),
-        "rating_usia": movie.get("rating_usia", "-"),
-        "price": movie.get("price", "-"),
-        "schedules": [
+    schedules: List[dict] = []
+    for j, st in rows:
+        schedules.append(
             {
-                "id_jadwal": j["id_jadwal"],
-                "studio": j["studio_name"],
-                "tanggal": j["date"],
-                "waktu": j["time"]
-            } for j in movie_schedules
-        ]
-    }
+                "jadwal_code": j.code,                   
+                "studio": st.name,                       
+                "tanggal": j.tanggal.isoformat(),        
+                "waktu": j.jam.strftime("%H:%M"),        
+            }
+        )
 
-# layout kursi 
-ROWS = 8
-COLS = 12
-AISLE_AFTER_COL = 6
-ROW_LETTERS = [chr(ord("A") + i) for i in range(ROWS)]
+    result = movie_to_public_dict(movie)
+    result["schedules"] = schedules
 
-def _empty_matrix() -> List[List[str]]:
-    return [["." for _ in range(COLS)] for _ in range(ROWS)]
+    return result
 
-# ---------------------------
-# Seats State (in-memory)
-# ---------------------------
-def _sid(x: Any) -> str:
-    """paksa id jadi string (aman kalau sumbernya int/str)."""
-    return str(x)
 
-SEATS_BY_SCHEDULE: Dict[str, List[List[str]]] = {}
 
-def _ensure_matrix(schedule_id: Any) -> List[List[str]]:
-    sid = _sid(schedule_id)
-    if sid not in SEATS_BY_SCHEDULE:
-        SEATS_BY_SCHEDULE[sid] = _empty_matrix()
-    return SEATS_BY_SCHEDULE[sid]
+def build_seat_display(
+    studio: Studio,
+    studio_seats: List[StudioSeat],
+    booked: set[tuple[str, int]],
+    in_cart: set[tuple[str, int]],
+) -> List[str]:
+    """
+    Bikin list string tampilan kursi:
+      baris 0: "SCREEN"
+      baris 1: nomor kursi kiri & kanan
+      baris berikutnya: A/B/C... dengan simbol kursi
 
-# =============================================== API KURSI ================================================
+      O = available
+      X = sudah dibeli (OrderSeat)
+      ~ = ada di cart
+    """
 
-# READ - Lihat denah kursi untuk jadwal tertentu
-@router.get("/schedules/{schedule_id}/seats")
-def denah_kursi(schedule_id: str):
-    _ensure_matrix(schedule_id)
-    mat = SEATS_BY_SCHEDULE.get(_sid(schedule_id))
-    if mat is None:
-        raise HTTPException(status_code=404, detail="Jadwal tidak ditemukan")
+    if not studio_seats:
+        return ["NO SEATS"]
 
-    left  = " ".join(str(i) for i in range(1, AISLE_AFTER_COL + 1))
-    right = " ".join(str(i) for i in range(AISLE_AFTER_COL + 1, COLS + 1))
-    lines = ["          SCREEN", f"   {left}   {right}"]
-    for r in range(ROWS):
-        L = " ".join(mat[r][:AISLE_AFTER_COL])
-        R = " ".join(mat[r][AISLE_AFTER_COL:])
-        lines.append(f"{ROW_LETTERS[r]}  {L}   {R}")
+    rows = sorted({s.row for s in studio_seats})
+    cols = sorted({s.col for s in studio_seats})
+
+    if len(cols) <= 6:
+        aisle_after = len(cols) // 2
+    else:
+        aisle_after = 6
+
+    lines: List[str] = []
+
+    lines.append("          SCREEN")
+
+    left_nums = [str(c) for c in cols if c <= aisle_after]
+    right_nums = [str(c) for c in cols if c > aisle_after]
+    left_str = " ".join(left_nums)
+    right_str = " ".join(right_nums)
+    lines.append(f"   {left_str}   {right_str}")
+
+    for r in rows:
+        left_syms = []
+        right_syms = []
+        for c in cols:
+            key = (r, c)
+            if key in booked:
+                sym = "X"
+            elif key in in_cart:
+                sym = "~"
+            else:
+                sym = "O"
+
+            if c <= aisle_after:
+                left_syms.append(sym)
+            else:
+                right_syms.append(sym)
+
+        L = " ".join(left_syms)
+        R = " ".join(right_syms)
+        lines.append(f"{r}  {L}   {R}")
+
+    return lines
+
+
+
+@router.get("/schedules/{jadwal_code}/seats")
+def denah_kursi(jadwal_code: str, db: Session = Depends(get_db)):
+    """
+    Menampilkan peta kursi berdasarkan jadwal.
+    Parameter diisi dengan jadwal code: JAD0XXX (contoh: JAD0001).
+    """
+
+    jadwal = db.query(Jadwal).filter(Jadwal.code == jadwal_code).first()
+    if not jadwal:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Jadwal dengan kode {jadwal_code} tidak ditemukan."
+        )
+
+    studio = db.query(Studio).filter(Studio.id == jadwal.studio_id).first()
+    movie = db.query(Movie).filter(Movie.id == jadwal.movie_id).first()
+
+    if not studio or not movie:
+        raise HTTPException(
+            status_code=500,
+            detail="Data studio atau film untuk jadwal ini tidak lengkap."
+        )
+
+    studio_seats = (
+        db.query(StudioSeat)
+        .filter(StudioSeat.studio_id == studio.id)
+        .all()
+    )
+
+    booked_rows = (
+        db.query(OrderSeat)
+        .filter(OrderSeat.jadwal_id == jadwal.id)
+        .all()
+    )
+    booked_set = {(s.row, s.col) for s in booked_rows}
+
+    cart_rows = (
+        db.query(Cart)
+        .filter(Cart.jadwal_id == jadwal.id)
+        .all()
+    )
+    cart_set = {(c.row, c.col) for c in cart_rows}
+
+    display = build_seat_display(studio, studio_seats, booked_set, cart_set)
 
     return {
-        "schedule_id": _sid(schedule_id),
-        "display": lines,
+        "jadwal_code": jadwal_code,
+        "movie_title": movie.title,
+        "studio": studio.name,
+        "display": display
     }
