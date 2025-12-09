@@ -29,7 +29,7 @@ Proyek ini mencakup fitur lengkap mulai dari manajemen film oleh admin, transaks
 * **Checkout & Pembayaran:**
   * Mendukung metode pembayaran **CASH** (dengan perhitungan kembalian).
   * Mendukung metode **QRIS/Cashless**.
-  * Perhitungan diskon otomatis (Promo Bulk Buy, Tanggal Cantik, dll).
+  * Perhitungan diskon otomatis (Promo Bulk Buy, Tanggal Cantik).
 * **Tiket:** Generasi kode order unik (`ORD-XXXXXX`).
 
 ### 📊 Analisis Data (Analytics)
