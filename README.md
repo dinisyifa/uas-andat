@@ -13,10 +13,11 @@ Proyek ini mencakup fitur lengkap mulai dari manajemen film oleh admin, transaks
 ## 🚀 Fitur Utama
 
 ### 🛠 Admin 
-* **Manajemen Film:** CRUD data film (Judul, Genre, Durasi, Harga).
-* **Manajemen Studio:** Pengaturan layout kursi (Baris & Kolom).
-* **Manajemen Jadwal:** Penjadwalan tayang film.
-* **Membership System:** Menambahkan keanggotaan.
+* **Manajemen Film:** Melakukan CRUD (Tambah, Lihat, Ubah, Hapus) detail film (Judul, Durasi, Sutradara, Rating). Harga Tiket (price) secara otomatis ditetapkan oleh sistem berdasarkan durasi film.
+* **Manajemen Studio:** Melakukan CRUD pengaturan studio (Nama, Kode, Kapasitas). Input utama adalah jumlah Baris (rows) dan Kolom (cols) untuk menentukan layout kursi.
+* **Manajemen Jadwal:** Membuat, melihat, memperbarui, dan menghapus jadwal tayang. Setiap jadwal harus terhubung dengan satu Movie Code dan satu Studio Code yang valid. Pencegahan Konflik: Saat menambahkan jadwal baru, sistem melakukan validasi penting:
+Memastikan Studio tidak mengalami bentrok waktu tayang pada tanggal yang sama, dengan memperhitungkan durasi film (end_time).
+* **Membership System:** Melakukan CRUD untuk jenis-jenis keanggotaan. Setiap jenis keanggotaan memiliki Kode unik (misalnya, MEM001) dan Nama. Ini mendasari sistem diskon dan validasi keanggotaan di sisi transaksi.
 
 ### 👤 User 
 * **Katalog Film:** Menampilkan film yang sedang tayang
@@ -34,10 +35,14 @@ Proyek ini mencakup fitur lengkap mulai dari manajemen film oleh admin, transaks
 
 ### 📊 Analisis Data (Analytics)
 API khusus untuk melihat performa bisnis menggunakan **SQLAlchemy & Pandas**:
-* **Top Movies:** Film terlaris berdasarkan penjualan tiket (Harian/Mingguan/Bulanan).
-* **Peak Hours:** Analisis jam tayang paling ramai.
-* **Payment Preference:** Statistik metode pembayaran favorit user.
-* **Genre Popularity:** Tren genre film yang paling diminati.
+* **Film Terlaris:** Film terlaris berdasarkan penjualan tiket (Harian/Mingguan/Bulanan).
+* **Jam Tayang Puncak:** Menganalisis dan menentukan Jam Tayang Paling Ramai untuk setiap film, membantu optimasi jadwal..
+* **Popularitas Genre:** Mengukur Tren Genre Film yang diminati audiens, disajikan dalam persentase kontribusi terhadap total tiket terjual
+* **Kursi Paling Populer:** Menampilkan Top 5 Kursi yang paling sering dipesan, membantu memahami preferensi layout penonton.
+* **Efektivitas Promo: **Membandingkan kinerja transaksi dengan vs. tanpa promo.
+* Pendapatan Film: **Mengidentifikasi Film Juara Pendapatan (Pendapatan Tertinggi) per periode (harian, mingguan, bulanan), fokus pada metrik finansial.
+* Pelanggan Terbaik: **Mengidentifikasi Pelanggan Ter-Rajin (Top Customers) berdasarkan frekuensi order terbanyak per periode (mingguan atau bulanan).
+* Hari Tersibuk: **Menentukan Tanggal Spesifik dan Nama Hari yang paling sibuk/ramai (berdasarkan total tiket terjual).
 
 ---
 
@@ -45,18 +50,25 @@ API khusus untuk melihat performa bisnis menggunakan **SQLAlchemy & Pandas**:
 
 ```text
 movie-booking-system/
+├── .env 
 ├── app/
-│   ├── __init__.py
-│   ├── main.py              # Entry point aplikasi FastAPI
-│   ├── database.py          # Koneksi Database
-│   ├── models.py            # Definisi Tabel & Script Seeding
-│   └── routers/             # Endpoint API
-│       ├── __init__.py
-│       ├── admin_film.py    # API Admin (Film, Studio, Jadwal)
-│       ├── admin_analytics.py # API Analisis Data
-│       └── user_transaction.py # API Cart & Checkout
+│   ├── __init__.py
+│   ├── main.py # Entry point aplikasi FastAPI
+│   ├── database.py # Koneksi Database
+│   ├── models.py # Definisi Tabel & Script Seeding
+│   └── routers/ # Endpoint API
+│       ├── __init__.py
+│       ├── admin_film.py # API Admin (Film)
+│       ├── admin_jadwal.py # API Admin (Jadwal)
+│       ├── analisis.py 
+│       ├── user_catalog.py # API User (Katalog Film)
+│       └── user_transaction.py # API User (Transaksi/Checkout)
 ├── tests/
-│   ├── test_analisis_lulu.py # Unit Testing (SQLite In-Memory)
-├── .env                     # Konfigurasi Environment (Password DB)
-├── requirements.txt         # Daftar Library Python
-└── README.md                # Dokumentasi Proyek
+│   ├── __init__.py
+│   ├── test_admin_film.py # Unit Testing
+│   ├── test_admin_jadwal.py # Unit Testing
+│   ├── test_user_catalog.py # Unit Testing
+│   └── test_user_transaction.py # Unit Testing
+├── .gitignore
+├── README.md # Dokumentasi Proyek
+└── requirements.txt # Daftar Library Python
