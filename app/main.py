@@ -8,7 +8,11 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Movie Booking System",
-    description="Proyek UAS",
+    description="""Sistem ini menyediakan serangkaian endpoint untuk mengelola seluruh alur pemesanan tiket bioskop secara digital, dengan modul utama:
+     **Admin**: Mengelola data film, studio, membership, dan jadwal tayang.
+     **User**: Melihat katalog film, memesan tiket, dan melihat riwayat transaksi.
+     Serta terdapat modul analisis untuk menganalisis keseluruhan Movie Booking System melalui database yang tersedia.
+     """,
     version="2.1.0"
 )
 
@@ -21,7 +25,7 @@ app.include_router(user_catalog.router,     tags=["User - Katalog"])
 app.include_router(user_transaction.router, tags=["User - Cart & Checkout"])
 
 # Analisis
-app.include_router(analisis.router, prefix="/api/admin", tags=["Analisis Data"])
+app.include_router(analisis.router, tags=["Analisis Data"])
 
 @app.get("/")
 def home():

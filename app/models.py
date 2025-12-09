@@ -8,8 +8,7 @@ import random, datetime
 from tqdm import tqdm
 from app.database import DATABASE_URL, Base, get_db
 
-# Pastikan konfigurasi database Anda benar
-password = "Matius6ayat25@"
+password = "@Keju1234"
 password = password.replace("@", "%40")
 DATABASE_URL = f"mysql+pymysql://root:{password}@localhost:3306/bioskop"
 
@@ -111,14 +110,11 @@ class Cart(Base):
     __tablename__ = "carts"
     id = Column(Integer, primary_key=True)
     
-    # Identitas User
     membership_id = Column(Integer)
     membership_code = Column(String(20)) 
     
-    # Identitas Jadwal
     jadwal_id = Column(Integer)
     
-    # Detail Kursi & Harga
     studio_id = Column(Integer) 
     row = Column(String(3))
     col = Column(Integer)
@@ -151,7 +147,6 @@ def main():
     Base.metadata.create_all(engine)
     db = Session()
 
-    # --- MEMASTIKAN ID 0 BISA MASUK ---
     try:
         db.execute(text("SET SESSION sql_mode='NO_AUTO_VALUE_ON_ZERO';"))
     except Exception as e:
@@ -194,16 +189,13 @@ def main():
     print("Generating Members...")
     members = []
 
-    # --- KHUSUS: Buat Member ID 0 (Non-Member) ---
     guest = Membership(
         id=0,
         code="MEM000",
         nama="Non-Member (Guest)"
     )
     db.add(guest)
-    # Note: Guest tidak dimasukkan ke list 'members' agar tidak ikut random order di bawah
 
-    # --- Buat 100 Member Regular ---
     for i in range(1, NUM_MEMBERS + 1):
         m = Membership(code=gen("MEM", i, 3), nama=fake.name())
         db.add(m)
