@@ -348,7 +348,7 @@ def jamtayang_monthly(bulan: str, db: Session = Depends(get_db)):
 # ==============================================================================
 # 6. METODE PEMBAYARAN (Payment Preference)
 # ==============================================================================
-@router.get("/analytics/payment-methods")
+@router.get("/analisis/metode-pembayaran")
 def metode_pembayaran(db: Session = Depends(get_db)):
     """Orang-orang lebih suka bayar pakai apa?"""
     query = text("""
@@ -369,7 +369,7 @@ def metode_pembayaran(db: Session = Depends(get_db)):
 # 7. GENRE POPULARITY (Genre Paling Diminati)
 # ==============================================================================
 
-@router.get("/analytics/genre-popularity")
+@router.get("/analisis/popularitas-genre")
 def popularitas_genre(db: Session = Depends(get_db)):
     """Genre film apa yang paling banyak ditonton beserta persentase minatnya?"""
     query = text("""
@@ -389,7 +389,7 @@ def popularitas_genre(db: Session = Depends(get_db)):
     return {"data": result}
 
 
-@router.get("/analytics/genre-popularity/weekly")
+@router.get("/analisis/popularitas-genre/mingguan")
 def popularitas_genre_weekly(db: Session = Depends(get_db)):
     year = 2024
     month = 12
@@ -449,7 +449,7 @@ def popularitas_genre_weekly(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/analytics/genre-popularity/monthly")
+@router.get("/analisis/popularitas-genre/bulanan")
 def popularitas_genre_monthly(bulan: str, db: Session = Depends(get_db)):
     bulan_lower = bulan.lower()
     if bulan_lower not in MONTH_NAMES:
