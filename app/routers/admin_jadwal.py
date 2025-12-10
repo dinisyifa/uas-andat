@@ -35,6 +35,9 @@ def generate_schedule_code(db: Session):
 
 @router.get("", response_model=list[ScheduleOut])
 def get_schedules(db: Session = Depends(get_db)):
+    """
+    Mengambil daftar semua jadwal dengan Query Manual yang aman (tanpa bergantung pada FK di DB).
+    """
     schedules = db.query(Jadwal).all()
     output = []
 
@@ -61,12 +64,10 @@ def get_schedules(db: Session = Depends(get_db)):
 @router.post("", response_model=ScheduleOut)
 def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
 
-    # cek movie
     movie = db.query(Movie).filter(Movie.code == item.movie_code).first()
     if not movie:
         raise HTTPException(404, f"Movie code {item.movie_code} tidak ditemukan.")
 
-    # cek studio
     studio = db.query(Studio).filter(Studio.code == item.studio_code).first()
     if not studio:
         raise HTTPException(404, f"Studio code {item.studio_code} tidak ditemukan.")
@@ -105,8 +106,8 @@ def add_schedule(item: ScheduleInput, db: Session = Depends(get_db)):
         code=schedule.code,
         movie_code=schedule.movie_code,
         studio_code=schedule.studio_code,
-        tanggal=schedule.tanggal,
-        jam=schedule.jam,
+        tanggal=str(schedule.tanggal),
+        jam=str(schedule.jam),
         movie_title=movie.title,
         studio_name=studio.name
     )
@@ -139,8 +140,8 @@ def update_schedule(code: str, item: ScheduleInput, db: Session = Depends(get_db
         code=schedule.code,
         movie_code=schedule.movie_code,
         studio_code=schedule.studio_code,
-        tanggal=schedule.tanggal,
-        jam=schedule.jam,
+        tanggal=str(schedule.tanggal),
+        jam=str(schedule.jam),
         movie_title=movie.title,
         studio_name=studio.name
     )

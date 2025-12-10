@@ -6,16 +6,20 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.models import Cart, Jadwal, Order, OrderSeat, Membership, Movie    
+from app.models import Cart, Jadwal, Order, OrderSeat, Membership, Movie, StudioSeat, Studio  
 
 router = APIRouter()
 
 # CART
 class CartAddItem(BaseModel):
     membership_code: str
-    jadwal_id: int
+    jadwal_code: str
     row: str
     col: int
+
+class CartAddResponse(BaseModel):
+    message: str
+    data: CartAddItem  
 
 class CartItemResponse(BaseModel):
     cart_id: int
@@ -28,18 +32,19 @@ class CartItemResponse(BaseModel):
 # CHECKOUT
 class CheckoutRequest(BaseModel):
     membership_code: str
-    payment_method: str # "QRIS", "Debit", "Cash", "ShopeePay", etc.
+    payment_method: str 
     cash_amount: Optional[int] = None
 
 class OrderResponse(BaseModel):
     order_code: str
     total_seat: int
     final_price: int
+    change: int         
     status: str
+    message: str         
 
 
 def check_seat_taken(db: Session, jadwal_id: int, row: str, col: int) -> bool:
-    """Mengecek apakah kursi sudah ada di tabel OrderSeat (terjual)"""
     taken = db.query(OrderSeat).filter_by(
         jadwal_id=jadwal_id, 
         row=row, 
@@ -47,57 +52,59 @@ def check_seat_taken(db: Session, jadwal_id: int, row: str, col: int) -> bool:
     ).first()
     return taken is not None
 
-# --- Routes ---
 
-# CREATE CART
-@router.post("/cart/add", response_model=CartAddItem)
+@router.post("/cart/add", response_model=CartAddResponse)
 def add_to_cart(item: CartAddItem, db: Session = Depends(get_db)):
-    # 1. Validasi Jadwal
-    jadwal = db.query(Jadwal).filter(Jadwal.id == item.jadwal_id).first()
-    if not jadwal:
-        raise HTTPException(404, "Jadwal tidak ditemukan")
 
-    # 2. Validasi Member
+    jadwal = db.query(Jadwal).filter(Jadwal.code == item.jadwal_code).first()
+    if not jadwal:
+        raise HTTPException(404, detail=f"Jadwal dengan kode {item.jadwal_code} tidak ditemukan")
+
     member = db.query(Membership).filter(Membership.code == item.membership_code).first()
     if not member:
-        raise HTTPException(404, "Member tidak ditemukan")
+        raise HTTPException(404, detail=f"Member dengan kode {item.membership_code} tidak ditemukan")
 
-    # 3. Cek apakah kursi sudah TERJUAL di OrderSeat
-    if check_seat_taken(db, item.jadwal_id, item.row, item.col):
-        raise HTTPException(400, "Kursi sudah terjual")
+    if check_seat_taken(db, jadwal.id, item.row, item.col):
+        raise HTTPException(400, detail="Kursi sudah terjual")
 
-    # 4. Cek apakah kursi sudah ada di CART user sendiri (duplikat)
-    existing_cart = db.query(Cart).filter_by(
-        membership_code=item.membership_code,
-        jadwal_id=item.jadwal_id,
-        row=item.row,
-        col=item.col
+    existing_cart = db.query(Cart).filter(
+        Cart.membership_id == member.id,
+        Cart.jadwal_id == jadwal.id,
+        Cart.row == item.row,
+        Cart.col == item.col
     ).first()
     
     if existing_cart:
-        return {"message": "Kursi sudah ada di keranjang"}
+        return {
+        "message": "Tiket sudah ada di keranjang",
+        "data": item
+    }
 
-    # 5. Tambah ke Cart
-    # Ambil harga dari Movie
-    movie_price = jadwal.movie.price
+    movie = db.query(Movie).filter(Movie.id == jadwal.movie_id).first()
+    movie_price = movie.price if movie else 0
     
+
     new_item = Cart(
-        membership_code=item.membership_code,
-        jadwal_id=item.jadwal_id,
+        membership_id=member.id,       
+        membership_code=member.code,   
+        
+        jadwal_id=jadwal.id,           
+        
+        studio_id=jadwal.studio_id,    
+        price=movie_price,             
+        
         row=item.row,
-        col=item.col,
-        price=movie_price
+        col=item.col
     )
+    
     db.add(new_item)
     db.commit()
+    db.refresh(new_item) 
     
-    return {"message": "Berhasil masuk keranjang", "seat": f"{item.row}{item.col}"}
-
-# GET - Lihat isi keranjang
-@router.get("/cart")
-def get_all_carts(db: Session = Depends(get_db)):
-    carts = db.query(Cart).all()
-    return carts
+    return {
+        "message": "Tiket berhasil ditambahkan",
+        "data": item
+    }
 
 # READ MEMBERSHIP CART
 @router.get("/cart/{membership_code}")
@@ -109,15 +116,25 @@ def get_cart(membership_code: str, db: Session = Depends(get_db)):
 
     result = []
     total = 0
+    
     for i in items:
-        # Format tanggal & jam
-        dt_str = f"{i.jadwal.tanggal} {i.jadwal.jam}"
+
+        jadwal = db.query(Jadwal).filter(Jadwal.id == i.jadwal_id).first()
+        if not jadwal: continue
+
+        movie = db.query(Movie).filter(Movie.id == jadwal.movie_id).first()
+        studio = db.query(Studio).filter(Studio.id == jadwal.studio_id).first()
+        
+        movie_title = movie.title if movie else "Unknown Movie"
+        studio_name = studio.name if studio else "Unknown Studio"
+        
+        dt_str = f"{jadwal.tanggal} {jadwal.jam}"
         seat_str = f"{i.row}-{i.col}"
         
         result.append({
             "cart_id": i.id,
-            "movie_title": i.jadwal.movie.title,
-            "studio_name": i.jadwal.studio.name,
+            "movie_title": movie_title,
+            "studio_name": studio_name,
             "date_time": dt_str,
             "seat": seat_str,
             "price": i.price
@@ -137,56 +154,68 @@ def remove_cart_item(cart_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Item dihapus dari keranjang"}
 
-# CREATE CHECKOUT
 @router.post("/checkout", response_model=OrderResponse)
 def checkout_cart(payload: CheckoutRequest, db: Session = Depends(get_db)):
-    # 1. Ambil semua item di cart user
+
     cart_items = db.query(Cart).filter(Cart.membership_code == payload.membership_code).all()
     if not cart_items:
         raise HTTPException(400, "Keranjang kosong")
 
-    # 2. Validasi Ketersediaan Kursi (Last Minute Check)
-    # Jika saat user memilih kursi masih kosong, tapi saat checkout sudah dibeli orang lain
     for item in cart_items:
         if check_seat_taken(db, item.jadwal_id, item.row, item.col):
-             raise HTTPException(409, f"Gagal: Kursi {item.row}-{item.col} baru saja dibeli orang lain.")
+             raise HTTPException(409, detail=f"Gagal: Kursi {item.row}-{item.col} baru saja dibeli orang lain.")
 
-    # 3. Hitung Total & Promo
     member = db.query(Membership).filter(Membership.code == payload.membership_code).first()
     
     total_price = sum(item.price for item in cart_items)
     seat_count = len(cart_items)
     
-    # Logika promo sederhana (sesuai kode Anda sebelumnya)
     discount = 0
     promo_name = "NO PROMO"
-    
-    # Contoh promo bulk buy
     if seat_count >= 5:
         promo_name = "BULK 5+"
-        discount = 20 # 20%
+        discount = 20 
     
     discount_amount = int(total_price * discount / 100)
     final_price = total_price - discount_amount
 
-    # Hitung kembalian jika Cash
     change = 0
-    if payload.payment_method.upper() == "CASH":
-        if not payload.cash_amount or payload.cash_amount < final_price:
-            raise HTTPException(400, "Uang tunai kurang")
-        change = payload.cash_amount - final_price
-    else:
-        payload.cash_amount = final_price # Asumsi uang pas untuk non-tunai
+    status_message = "Menunggu Pembayaran" 
+    custom_message = "Transaksi Berhasil"  
 
-    # 4. Buat Order Baru
+    if payload.payment_method.upper() == "CASH":
+        user_cash = payload.cash_amount if payload.cash_amount else 0
+        
+        if user_cash < final_price:
+            kurang = final_price - user_cash
+            raise HTTPException(400, detail=f"Uang tunai kurang Rp {kurang}")
+        
+        change = user_cash - final_price
+        
+        if change > 0:
+            custom_message = f"Pembayaran Lunas. Kembalian Anda: Rp {change}"
+        else:
+            custom_message = "Pembayaran Lunas. Uang Pas."
+            
+        status_message = "PAID"
+
+    else:
+
+        payload.cash_amount = final_price
+        change = 0
+        custom_message = f"Pembayaran {payload.payment_method} Berhasil"
+        status_message = "PAID"
+
     first_item = cart_items[0]
-    jadwal = first_item.jadwal
+
+    jadwal = db.query(Jadwal).filter(Jadwal.id == first_item.jadwal_id).first()
     
-    # Generate Order Code
+    if not jadwal:
+        raise HTTPException(404, "Data jadwal korup/hilang")
+    
     order_code_suffix = uuid.uuid4().hex[:6].upper()
     order_code = f"ORD-{order_code_suffix}"
     
-    # Mapping nama hari
     days = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
     today_day = days[datetime.now().weekday()]
 
@@ -194,7 +223,10 @@ def checkout_cart(payload: CheckoutRequest, db: Session = Depends(get_db)):
         code=order_code,
         membership_id=member.id,
         membership_code=member.code,
+        
         jadwal_id=jadwal.id,
+        jadwal_code=jadwal.code, 
+        
         payment_method=payload.payment_method,
         seat_count=seat_count,
         promo_name=promo_name,
@@ -207,20 +239,18 @@ def checkout_cart(payload: CheckoutRequest, db: Session = Depends(get_db)):
         hari=today_day
     )
     db.add(new_order)
-    db.flush() # Flush untuk mendapatkan ID Order
+    db.flush() 
 
-    # 5. Pindahkan Cart -> OrderSeat
-    for item in cart_items:
+    for item in cart_items:       
         order_seat = OrderSeat(
             order_id=new_order.id,
             jadwal_id=item.jadwal_id,
-            studio_id=jadwal.studio_id,
+            studio_id=item.studio_id, 
             row=item.row,
             col=item.col
         )
         db.add(order_seat)
     
-    # 6. Kosongkan Cart User
     for item in cart_items:
         db.delete(item)
 
@@ -230,21 +260,28 @@ def checkout_cart(payload: CheckoutRequest, db: Session = Depends(get_db)):
         "order_code": order_code,
         "total_seat": seat_count,
         "final_price": final_price,
-        "status": "SUCCESS"
+        "change": change,           
+        "status": status_message,   
+        "message": custom_message   
     }
 
-# READ KONFIRMASI CHECKOUT
 @router.get("/order/{order_code}", response_model=OrderResponse)
 def get_order(order_code: str, db: Session = Depends(get_db)):  
     order = db.query(Order).filter(Order.code == order_code).first()
     if not order:
         raise HTTPException(404, "Order tidak ditemukan")
     
+    msg = "Transaksi Berhasil"
+    if order.change and order.change > 0:
+        msg = f"Kembalian: Rp {order.change}"
+    
     return {
         "order_code": order.code,
         "total_seat": order.seat_count,
         "final_price": order.final_price,
-        "status": f"Pesanan `{order.code}` berhasil diproses"
+        "change": order.change if order.change else 0, 
+        "status": "PAID", 
+        "message": msg
     }
 
 # DELETE CART ITEM

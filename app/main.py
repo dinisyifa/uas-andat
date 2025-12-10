@@ -1,14 +1,18 @@
+
 # app/main.py
 from fastapi import FastAPI
-from app.routers import admin_film, user_transaction, admin_jadwal, user_catalog
+from app.routers import admin_film, admin_jadwal, user_catalog, user_transaction, analisis
 from app.database import engine, Base
 import app.models
-from app.routers import analisis
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Movie Booking System",
-    description="Proyek UAS",
+    description="""Sistem ini menyediakan serangkaian endpoint untuk mengelola seluruh alur pemesanan tiket bioskop secara digital, dengan modul utama:
+     **Admin**: Mengelola data film, studio, membership, dan jadwal tayang.
+     **User**: Melihat katalog film, memesan tiket, dan melihat riwayat transaksi.
+     Serta terdapat modul analisis untuk menganalisis keseluruhan Movie Booking System melalui database yang tersedia.
+     """,
     version="2.1.0"
 )
 
